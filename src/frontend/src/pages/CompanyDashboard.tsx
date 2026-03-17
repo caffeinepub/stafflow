@@ -2,38 +2,92 @@ import {
   AlertTriangle,
   BarChart3,
   Building2,
+  Calendar,
   Check,
+  ChevronDown,
+  ChevronUp,
+  ClipboardList,
   Copy,
+  Database,
   Download,
+  EyeOff,
   LogOut,
   Moon,
+  Pencil,
   Plus,
   QrCode,
+  Settings,
   Sun,
+  Trash2,
+  TrendingUp,
+  Upload,
+  UserCheck,
+  UserX,
   Users,
   X,
   Zap,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { toast } from "sonner";
 import type { Page, Session } from "../App";
 import { LANGUAGES, type Lang } from "../i18n";
 import {
   type AttendanceRecord,
+  type CorrectionRequest,
   type Employee,
   type InviteCode,
+  type LeaveRecord,
+  type MonthlySummaryRow,
+  type PublicHoliday,
+  type Shift,
+  addLeaveRecord,
+  addPublicHoliday,
+  approveCorrectionRequest,
+  assignEmployeeShift,
   cancelInviteCode,
+  clearEmployeePersonalWorkHours,
   createInviteCode,
+  deleteLeaveRecord,
+  deletePublicHoliday,
+  exportAllData,
   formatDuration,
   getAllCompanyAttendance,
   getCheckedInEmployees,
   getCompany,
   getCompanyAttendance,
+  getCompanyCorrectionRequests,
+  getCompanyDepartments,
   getCompanyEmployees,
+  getCompanyHolidays,
   getCompanyInviteCodes,
+  getCompanyLeaveRecords,
   getDailyCheckinCount,
   getInviteCodeStatus,
+  getMonthlyAttendanceSummary,
+  getOvertimeMinutes,
   getRecordDuration,
+  getRecordDurationMinutes,
+  importAllData,
+  isEarlyCheckout,
+  isLateCheckin,
+  rejectCorrectionRequest,
+  toggleEmployeeActive,
+  updateCompanyMinHours,
+  updateCompanyShifts,
+  updateCompanyWorkDays,
+  updateCompanyWorkHours,
+  updateEmployeeDepartment,
+  updateEmployeePersonalMinHours,
+  updateEmployeePersonalWorkHours,
 } from "../store";
 
 interface Props {
@@ -47,7 +101,16 @@ interface Props {
   onLogout: () => void;
 }
 
-type Tab = "overview" | "live" | "invites" | "employees" | "attendance";
+type Tab =
+  | "overview"
+  | "live"
+  | "invites"
+  | "employees"
+  | "attendance"
+  | "summary"
+  | "statistics"
+  | "corrections"
+  | "settings";
 
 function formatDate(ts: number) {
   return new Date(ts).toLocaleString();
@@ -86,7 +149,79 @@ export default function CompanyDashboard({
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
 
+  // Settings state
+  const [workStart, setWorkStart] = useState("");
+  const [workEnd, setWorkEnd] = useState("");
+  const [savingWorkHours, setSavingWorkHours] = useState(false);
+
+  // Leave records state
+  const [leaveRecords, setLeaveRecords] = useState<LeaveRecord[]>([]);
+  const [showAddLeave, setShowAddLeave] = useState(false);
+  const [leaveEmpId, setLeaveEmpId] = useState("");
+  const [leaveDate, setLeaveDate] = useState("");
+  const [leaveType, setLeaveType] = useState<LeaveRecord["type"]>("leave");
+  const [leaveNote, setLeaveNote] = useState("");
+  const [savingLeave, setSavingLeave] = useState(false);
+
+  // Summary state
+  const [summaryYear, setSummaryYear] = useState(new Date().getFullYear());
+  const [summaryMonth, setSummaryMonth] = useState(new Date().getMonth());
+  const [summaryData, setSummaryData] = useState<MonthlySummaryRow[]>([]);
+
   const company = getCompany(session.id);
+
+  const DEFAULT_WORK_DAYS = [1, 2, 3, 4, 5];
+  const [workDays, setWorkDays] = useState<number[]>(
+    company?.workDays ?? DEFAULT_WORK_DAYS,
+  );
+  const [savingWorkDays, setSavingWorkDays] = useState(false);
+
+  // Department filter
+  const [filterDepartment, setFilterDepartment] = useState("");
+
+  // Department edit state
+  const [editDeptEmpId, setEditDeptEmpId] = useState("");
+  const [editDeptValue, setEditDeptValue] = useState("");
+
+  // Active/inactive filter
+  const [showInactive, setShowInactive] = useState(false);
+
+  // Shift management state
+  const [newShiftName, setNewShiftName] = useState("");
+  const [newShiftStart, setNewShiftStart] = useState("08:00");
+  const [newShiftEnd, setNewShiftEnd] = useState("17:00");
+
+  // Min daily hours state
+  const [minDailyHoursValue, setMinDailyHoursValue] = useState(() =>
+    String(getCompany(session.id)?.minDailyHours || 0),
+  );
+  const [savingMinHours, setSavingMinHours] = useState(false);
+
+  // Backup/restore state
+  const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
+  const [restoreFile, setRestoreFile] = useState<File | null>(null);
+
+  // Holidays state
+  const [holidays, setHolidays] = useState<PublicHoliday[]>([]);
+  const [newHolidayDate, setNewHolidayDate] = useState("");
+  const [newHolidayName, setNewHolidayName] = useState("");
+
+  // Correction requests state
+  const [correctionRequests, setCorrectionRequests] = useState<
+    CorrectionRequest[]
+  >([]);
+  const [correctionFilter, setCorrectionFilter] = useState<"pending" | "all">(
+    "pending",
+  );
+  const [rejectingId, setRejectingId] = useState("");
+  const [rejectionNote, setRejectionNote] = useState("");
+
+  // Personal rules state (per employee expand)
+  const [expandedPersonalEmpId, setExpandedPersonalEmpId] = useState("");
+  const [personalStart, setPersonalStart] = useState("");
+  const [personalEnd, setPersonalEnd] = useState("");
+  const [personalMinH, setPersonalMinH] = useState("");
+  const [savingPersonal, setSavingPersonal] = useState(false);
 
   const loadData = useCallback(() => {
     setInviteCodes(getCompanyInviteCodes(session.id));
@@ -100,6 +235,8 @@ export default function CompanyDashboard({
     );
     setCheckedInList(getCheckedInEmployees(session.id));
     setAllAttendance(getAllCompanyAttendance(session.id));
+    setHolidays(getCompanyHolidays(session.id));
+    setCorrectionRequests(getCompanyCorrectionRequests(session.id));
   }, [session.id]);
 
   const loadAttendance = useCallback(() => {
@@ -107,17 +244,43 @@ export default function CompanyDashboard({
     const to = filterTo
       ? new Date(`${filterTo}T23:59:59`).getTime()
       : undefined;
-    setAttendance(
-      getCompanyAttendance(session.id, from, to, filterEmpId || undefined),
+    const empIdForFilter = filterEmpId || undefined;
+    setAttendance(getCompanyAttendance(session.id, from, to, empIdForFilter));
+    setLeaveRecords(
+      getCompanyLeaveRecords(
+        session.id,
+        filterFrom || undefined,
+        filterTo || undefined,
+        filterEmpId || undefined,
+      ),
     );
   }, [session.id, filterFrom, filterTo, filterEmpId]);
 
+  const loadSummary = useCallback(() => {
+    setSummaryData(
+      getMonthlyAttendanceSummary(session.id, summaryYear, summaryMonth),
+    );
+  }, [session.id, summaryYear, summaryMonth]);
+
   useEffect(() => {
     loadData();
-  }, [loadData]);
+    const comp = getCompany(session.id);
+    if (comp?.workHours) {
+      setWorkStart(comp.workHours.start);
+      setWorkEnd(comp.workHours.end);
+    }
+    if (comp?.workDays) {
+      setWorkDays(comp.workDays);
+    }
+  }, [loadData, session.id]);
+
   useEffect(() => {
     loadAttendance();
   }, [loadAttendance]);
+
+  useEffect(() => {
+    loadSummary();
+  }, [loadSummary]);
 
   function handleCreateInvite() {
     setCreatingInvite(true);
@@ -174,6 +337,332 @@ export default function CompanyDashboard({
     URL.revokeObjectURL(url);
   }
 
+  function handleSaveWorkHours() {
+    if (!workStart || !workEnd) {
+      toast.error(t("error"));
+      return;
+    }
+    setSavingWorkHours(true);
+    const res = updateCompanyWorkHours(session.id, workStart, workEnd);
+    setSavingWorkHours(false);
+    if (res.ok) toast.success(t("workHoursSaved") || t("success"));
+    else toast.error(res.message);
+  }
+
+  function handleSaveWorkDays() {
+    if (workDays.length === 0) {
+      toast.error(t("error"));
+      return;
+    }
+    setSavingWorkDays(true);
+    const res = updateCompanyWorkDays(session.id, workDays);
+    setSavingWorkDays(false);
+    if (res.ok) toast.success(t("workDaysSaved"));
+    else toast.error(res.message);
+  }
+
+  function handleSaveDepartment(empId: string) {
+    const res = updateEmployeeDepartment(empId, session.id, editDeptValue);
+    if (res.ok) {
+      toast.success(t("departmentSaved"));
+      setEditDeptEmpId("");
+      setEditDeptValue("");
+      loadData();
+    } else toast.error(res.message);
+  }
+
+  function handleExportPDF() {
+    const compName = company?.name || "StafFlow";
+    const headers = [t("employee"), t("type"), t("date"), t("duration")];
+    const rows = attendance.map((rec) => [
+      rec.employeeName,
+      rec.recordType === "checkin" ? t("checkinType") : t("checkoutType"),
+      formatDate(rec.timestamp),
+      getRecordDuration(rec, allAttendance),
+    ]);
+    const tableRows = rows
+      .map(
+        (r) =>
+          `<tr>${r.map((cell) => `<td style="border:1px solid #ddd;padding:6px 10px;font-size:12px">${cell}</td>`).join("")}</tr>`,
+      )
+      .join("");
+    const html = `<!DOCTYPE html><html><head><title>${compName} - ${t("attendance")}</title><style>body{font-family:sans-serif;padding:20px}h1{font-size:18px}table{border-collapse:collapse;width:100%}th{background:#2563eb;color:#fff;padding:8px 10px;text-align:left;font-size:12px}@media print{button{display:none}}</style></head><body><h1>${compName} - ${t("attendance")}</h1><p style="font-size:12px;color:#888">${new Date().toLocaleDateString()}</p><table><thead><tr>${headers.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${tableRows}</tbody></table><br/><button onclick="window.print()">Print / Save as PDF</button></body></html>`;
+    const win = window.open("", "_blank");
+    if (win) {
+      win.document.write(html);
+      win.document.close();
+    }
+  }
+
+  function handleAddLeave() {
+    if (!leaveEmpId || !leaveDate) {
+      toast.error(t("error"));
+      return;
+    }
+    setSavingLeave(true);
+    const res = addLeaveRecord(
+      session.id,
+      leaveEmpId,
+      leaveDate,
+      leaveType,
+      leaveNote,
+    );
+    setSavingLeave(false);
+    if (res.ok) {
+      toast.success(t("success"));
+      setShowAddLeave(false);
+      setLeaveEmpId("");
+      setLeaveDate("");
+      setLeaveType("leave");
+      setLeaveNote("");
+      loadAttendance();
+    } else {
+      toast.error(res.message);
+    }
+  }
+
+  function handleDeleteLeave(id: string) {
+    const res = deleteLeaveRecord(id, session.id);
+    if (res.ok) {
+      toast.success(t("success"));
+      loadAttendance();
+    } else toast.error(res.message);
+  }
+
+  function handleExportBackup() {
+    const json = exportAllData();
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const d = new Date().toISOString().split("T")[0];
+    a.download = `stafflow-backup-${d}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(t("backupSuccess"));
+  }
+
+  function handleRestoreBackup() {
+    if (!restoreFile) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      const res = importAllData(text);
+      if (res.ok) {
+        toast.success(t("restoreSuccess"));
+        setTimeout(() => window.location.reload(), 1000);
+      } else {
+        toast.error(t("restoreError"));
+      }
+    };
+    reader.readAsText(restoreFile);
+    setShowRestoreConfirm(false);
+    setRestoreFile(null);
+  }
+
+  function handleToggleActive(empId: string) {
+    const res = toggleEmployeeActive(empId, session.id);
+    if (res.ok) {
+      toast.success(res.active ? t("activate") : t("deactivate"));
+      loadData();
+    } else toast.error(res.message);
+  }
+
+  function handleAddShift() {
+    if (!newShiftName.trim() || !newShiftStart || !newShiftEnd) {
+      toast.error(t("error"));
+      return;
+    }
+    const comp = getCompany(session.id);
+    const existing = comp?.shifts || [];
+    const newShift: Shift = {
+      id: String(Date.now()),
+      name: newShiftName.trim(),
+      startTime: newShiftStart,
+      endTime: newShiftEnd,
+    };
+    const res = updateCompanyShifts(session.id, [...existing, newShift]);
+    if (res.ok) {
+      toast.success(t("shiftSaved"));
+      setNewShiftName("");
+      setNewShiftStart("08:00");
+      setNewShiftEnd("17:00");
+      loadData();
+    } else toast.error(res.message);
+  }
+
+  function handleDeleteShift(shiftId: string) {
+    const comp = getCompany(session.id);
+    const updated = (comp?.shifts || []).filter((s) => s.id !== shiftId);
+    const res = updateCompanyShifts(session.id, updated);
+    if (res.ok) {
+      toast.success(t("success"));
+      loadData();
+    } else toast.error(res.message);
+  }
+
+  function handleAssignShift(empId: string, shiftId: string) {
+    assignEmployeeShift(empId, session.id, shiftId);
+    loadData();
+  }
+
+  function handleSaveMinHours() {
+    const val = Number.parseFloat(minDailyHoursValue);
+    if (Number.isNaN(val) || val < 0) {
+      toast.error(t("error"));
+      return;
+    }
+    setSavingMinHours(true);
+    const res = updateCompanyMinHours(session.id, val);
+    setSavingMinHours(false);
+    if (res.ok) toast.success(t("minHoursSaved"));
+    else toast.error(res.message);
+  }
+
+  function handleAddHoliday() {
+    if (!newHolidayDate || !newHolidayName.trim()) {
+      toast.error(t("error"));
+      return;
+    }
+    const res = addPublicHoliday(session.id, newHolidayDate, newHolidayName);
+    if (res.ok) {
+      toast.success(t("holidaySaved"));
+      setNewHolidayDate("");
+      setNewHolidayName("");
+      loadData();
+      // refresh summary too
+      loadSummary();
+    } else toast.error(res.message);
+  }
+
+  function handleDeleteHoliday(id: string) {
+    const res = deletePublicHoliday(id, session.id);
+    if (res.ok) {
+      toast.success(t("holidayDeleted"));
+      loadData();
+      loadSummary();
+    } else toast.error(res.message);
+  }
+
+  function handleApproveCorrection(id: string) {
+    const res = approveCorrectionRequest(id, session.id);
+    if (res.ok) {
+      toast.success(t("correctionApproved"));
+      loadData();
+      loadAttendance();
+    } else toast.error(res.message);
+  }
+
+  function handleRejectCorrection(id: string) {
+    const res = rejectCorrectionRequest(id, session.id, rejectionNote);
+    if (res.ok) {
+      toast.success(t("correctionRejected"));
+      setRejectingId("");
+      setRejectionNote("");
+      loadData();
+    } else toast.error(res.message);
+  }
+
+  function openPersonalRules(emp: Employee) {
+    if (expandedPersonalEmpId === emp.id) {
+      setExpandedPersonalEmpId("");
+      return;
+    }
+    setExpandedPersonalEmpId(emp.id);
+    const ph = emp.personalWorkHours?.[session.id];
+    setPersonalStart(ph?.start || "");
+    setPersonalEnd(ph?.end || "");
+    setPersonalMinH(String(emp.personalMinHours?.[session.id] ?? ""));
+  }
+
+  function handleSavePersonalRules(empId: string) {
+    setSavingPersonal(true);
+    let ok = true;
+    if (personalStart && personalEnd) {
+      const res = updateEmployeePersonalWorkHours(
+        empId,
+        session.id,
+        personalStart,
+        personalEnd,
+      );
+      if (!res.ok) ok = false;
+    } else {
+      // clear if both are empty
+      if (!personalStart && !personalEnd) {
+        clearEmployeePersonalWorkHours(empId, session.id);
+      }
+    }
+    if (personalMinH !== "") {
+      const val = Number.parseFloat(personalMinH);
+      if (!Number.isNaN(val) && val >= 0) {
+        updateEmployeePersonalMinHours(empId, session.id, val);
+      }
+    }
+    setSavingPersonal(false);
+    if (ok) {
+      toast.success(t("personalRulesSaved"));
+      setExpandedPersonalEmpId("");
+      loadData();
+    } else {
+      toast.error(t("error"));
+    }
+  }
+
+  // Statistics computations
+  function getWeeklyTrendData() {
+    const data: { date: string; count: number }[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      d.setHours(0, 0, 0, 0);
+      const nextD = new Date(d);
+      nextD.setDate(nextD.getDate() + 1);
+      const count = allAttendance.filter(
+        (r) =>
+          r.recordType === "checkin" &&
+          r.timestamp >= d.getTime() &&
+          r.timestamp < nextD.getTime(),
+      ).length;
+      data.push({
+        date: `${d.getMonth() + 1}/${d.getDate()}`,
+        count,
+      });
+    }
+    return data;
+  }
+
+  function getDepartmentAttendanceData() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth();
+    const summary = getMonthlyAttendanceSummary(session.id, year, month);
+    const deptMap: Record<string, { attended: number; total: number }> = {};
+    for (const row of summary) {
+      const dept = row.employee.departments?.[session.id] || "Genel";
+      if (!deptMap[dept]) deptMap[dept] = { attended: 0, total: 0 };
+      deptMap[dept].total += 1;
+      if (row.daysAttended > 0) deptMap[dept].attended += 1;
+    }
+    return Object.entries(deptMap).map(([dept, { attended, total }]) => ({
+      dept,
+      rate: total > 0 ? Math.round((attended / total) * 100) : 0,
+    }));
+  }
+
+  function getTopEmployeesData() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth();
+    const summary = getMonthlyAttendanceSummary(session.id, year, month);
+    return summary
+      .sort((a, b) => b.totalWorkMinutes - a.totalWorkMinutes)
+      .slice(0, 5)
+      .map((row) => ({
+        name: row.employee.fullName.split(" ")[0],
+        hours: Math.round((row.totalWorkMinutes / 60) * 10) / 10,
+      }));
+  }
+
   const activeInvites = inviteCodes.filter(
     (c) => getInviteCodeStatus(c) === "active",
   ).length;
@@ -181,6 +670,12 @@ export default function CompanyDashboard({
   const lateEmployees = checkedInList.filter(
     ({ checkinTimestamp }) =>
       Date.now() - checkinTimestamp > LATE_THRESHOLD_HOURS * 60 * 60 * 1000,
+  );
+
+  const currentWorkHours = company?.workHours;
+
+  const pendingCorrections = correctionRequests.filter(
+    (r) => r.status === "pending",
   );
 
   const tabs: { key: Tab; label: string; icon: React.ReactNode }[] = [
@@ -193,6 +688,18 @@ export default function CompanyDashboard({
       label: t("attendance"),
       icon: <BarChart3 size={16} />,
     },
+    { key: "summary", label: t("summary"), icon: <Pencil size={16} /> },
+    {
+      key: "statistics",
+      label: t("statistics"),
+      icon: <TrendingUp size={16} />,
+    },
+    {
+      key: "corrections",
+      label: t("correctionRequests"),
+      icon: <ClipboardList size={16} />,
+    },
+    { key: "settings", label: t("settings"), icon: <Settings size={16} /> },
   ];
 
   return (
@@ -244,6 +751,7 @@ export default function CompanyDashboard({
           <button
             key={tb.key}
             type="button"
+            data-ocid={`${tb.key}.tab`}
             onClick={() => setTab(tb.key)}
             className={`flex items-center gap-2 px-4 py-3 text-sm font-medium whitespace-nowrap transition-colors ${
               tab === tb.key
@@ -256,6 +764,11 @@ export default function CompanyDashboard({
             {tb.key === "live" && checkedInList.length > 0 && (
               <span className="ml-1 bg-green-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">
                 {checkedInList.length}
+              </span>
+            )}
+            {tb.key === "corrections" && pendingCorrections.length > 0 && (
+              <span className="ml-1 bg-orange-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">
+                {pendingCorrections.length}
               </span>
             )}
           </button>
@@ -295,6 +808,16 @@ export default function CompanyDashboard({
                 </div>
                 <div className="font-medium mt-1">
                   {company.authorizedPerson}
+                </div>
+              </div>
+            )}
+            {currentWorkHours && (
+              <div className="mt-4 bg-card border border-border rounded-xl p-4 flex items-center gap-4">
+                <div className="text-sm text-muted-foreground">
+                  {t("workHours")}:
+                </div>
+                <div className="font-mono font-semibold text-blue-400">
+                  {currentWorkHours.start} – {currentWorkHours.end}
                 </div>
               </div>
             )}
@@ -433,6 +956,7 @@ export default function CompanyDashboard({
               <h2 className="text-xl font-bold">{t("inviteCodes")}</h2>
               <button
                 type="button"
+                data-ocid="invites.open_modal_button"
                 onClick={() => setShowCreateInvite(true)}
                 className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-xl transition-colors"
               >
@@ -486,64 +1010,277 @@ export default function CompanyDashboard({
 
         {tab === "employees" && (
           <div>
-            <h2 className="text-xl font-bold mb-6">{t("employees")}</h2>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold">{t("employees")}</h2>
+              <button
+                type="button"
+                onClick={() => setShowInactive(!showInactive)}
+                className="flex items-center gap-2 text-sm border border-border px-3 py-2 rounded-xl hover:bg-muted transition-colors text-muted-foreground"
+              >
+                {showInactive ? <EyeOff size={14} /> : <Users size={14} />}
+                {showInactive ? t("hideInactive") : t("showInactive")}
+              </button>
+            </div>
             {employees.length === 0 ? (
               <EmptyState text={t("noEmployees")} />
             ) : (
-              <div className="bg-card border border-border rounded-xl overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border">
-                      <th className="text-left px-4 py-3 text-muted-foreground font-medium">
-                        {t("fullName")}
-                      </th>
-                      <th className="text-left px-4 py-3 text-muted-foreground font-medium">
-                        {t("phone")}
-                      </th>
-                      <th className="text-left px-4 py-3 text-muted-foreground font-medium">
-                        {t("status")}
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {employees.map((emp) => {
-                      const isIn = checkedInList.some(
-                        ({ employee }) => employee.id === emp.id,
-                      );
-                      return (
-                        <tr
-                          key={emp.id}
-                          className="border-b border-border last:border-0 hover:bg-muted/50 transition-colors"
-                        >
-                          <td className="px-4 py-3 font-medium">
-                            {emp.fullName}
-                          </td>
-                          <td className="px-4 py-3 text-muted-foreground">
-                            {emp.phone || "-"}
-                          </td>
-                          <td className="px-4 py-3">
-                            <span
-                              className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
-                                isIn
-                                  ? "bg-green-500/20 text-green-400"
-                                  : "bg-gray-500/20 text-gray-400"
-                              }`}
-                            >
-                              <span
-                                className={`w-1.5 h-1.5 rounded-full ${
-                                  isIn
-                                    ? "bg-green-400 animate-pulse"
-                                    : "bg-gray-400"
-                                }`}
-                              />
-                              {isIn ? t("checkedIn") : t("checkedOut")}
+              <div className="space-y-2">
+                {employees
+                  .filter((emp) =>
+                    showInactive
+                      ? true
+                      : emp.activeInCompanies?.[session.id] !== false,
+                  )
+                  .map((emp, idx) => {
+                    const isActive =
+                      emp.activeInCompanies?.[session.id] !== false;
+                    const isIn = checkedInList.some(
+                      ({ employee }) => employee.id === emp.id,
+                    );
+                    const isExpanded = expandedPersonalEmpId === emp.id;
+                    return (
+                      <div
+                        key={emp.id}
+                        data-ocid={`employees.item.${idx + 1}`}
+                        className={`bg-card border border-border rounded-xl overflow-hidden transition-all ${
+                          isActive ? "" : "opacity-50"
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center gap-2 px-4 py-3">
+                          <div className="flex-1 min-w-0">
+                            <span className="font-medium text-sm">
+                              {emp.fullName}
                             </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                            {emp.phone && (
+                              <span className="ml-2 text-xs text-muted-foreground">
+                                {emp.phone}
+                              </span>
+                            )}
+                          </div>
+                          {/* Department */}
+                          <div className="hidden md:block">
+                            {editDeptEmpId === emp.id ? (
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="text"
+                                  value={editDeptValue}
+                                  onChange={(e) =>
+                                    setEditDeptValue(e.target.value)
+                                  }
+                                  placeholder={t("departmentPlaceholder")}
+                                  className="bg-background border border-border rounded-lg px-2 py-1 text-xs w-32 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter")
+                                      handleSaveDepartment(emp.id);
+                                    if (e.key === "Escape") {
+                                      setEditDeptEmpId("");
+                                      setEditDeptValue("");
+                                    }
+                                  }}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleSaveDepartment(emp.id)}
+                                  className="p-1 hover:bg-green-500/10 text-green-400 rounded"
+                                >
+                                  <Check size={12} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditDeptEmpId("");
+                                    setEditDeptValue("");
+                                  }}
+                                  className="p-1 hover:bg-muted rounded"
+                                >
+                                  <X size={12} />
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditDeptEmpId(emp.id);
+                                  setEditDeptValue(
+                                    emp.departments?.[session.id] || "",
+                                  );
+                                }}
+                                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground group"
+                              >
+                                <span>
+                                  {emp.departments?.[session.id] || "-"}
+                                </span>
+                                <Pencil
+                                  size={10}
+                                  className="opacity-0 group-hover:opacity-60"
+                                />
+                              </button>
+                            )}
+                          </div>
+                          {/* Shift */}
+                          <div className="hidden lg:block">
+                            <select
+                              value={emp.assignedShifts?.[session.id] || ""}
+                              onChange={(e) =>
+                                handleAssignShift(emp.id, e.target.value)
+                              }
+                              className="bg-background border border-border rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            >
+                              <option value="">{t("noShift")}</option>
+                              {(company?.shifts || []).map((sh) => (
+                                <option key={sh.id} value={sh.id}>
+                                  {sh.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          {/* Status badge */}
+                          <span
+                            className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
+                              isIn
+                                ? "bg-green-500/20 text-green-400"
+                                : "bg-gray-500/20 text-gray-400"
+                            }`}
+                          >
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full ${isIn ? "bg-green-400 animate-pulse" : "bg-gray-400"}`}
+                            />
+                            {isIn ? t("checkedIn") : t("checkedOut")}
+                          </span>
+                          {/* Active toggle */}
+                          <button
+                            type="button"
+                            data-ocid={`employees.toggle.${idx + 1}`}
+                            onClick={() => handleToggleActive(emp.id)}
+                            className={`flex items-center gap-1 text-xs px-2 py-1 rounded-lg border transition-colors ${
+                              isActive
+                                ? "border-red-500/40 text-red-400 hover:bg-red-500/10"
+                                : "border-green-500/40 text-green-400 hover:bg-green-500/10"
+                            }`}
+                          >
+                            {isActive ? (
+                              <UserX size={12} />
+                            ) : (
+                              <UserCheck size={12} />
+                            )}
+                            {isActive ? t("deactivate") : t("activate")}
+                          </button>
+                          {/* Personal rules toggle */}
+                          <button
+                            type="button"
+                            data-ocid={`employees.edit_button.${idx + 1}`}
+                            onClick={() => openPersonalRules(emp)}
+                            className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground"
+                            title={t("personalRules")}
+                          >
+                            <Settings size={12} />
+                            {isExpanded ? (
+                              <ChevronUp size={12} />
+                            ) : (
+                              <ChevronDown size={12} />
+                            )}
+                          </button>
+                        </div>
+                        {/* Personal rules expanded section */}
+                        {isExpanded && (
+                          <div className="border-t border-border bg-muted/20 px-4 py-4">
+                            <div className="text-xs font-semibold text-muted-foreground mb-3">
+                              {t("personalRules")}
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                              <div>
+                                <div className="text-xs text-muted-foreground mb-1">
+                                  {t("personalWorkHours")} ({t("workStart")})
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    type="time"
+                                    value={personalStart}
+                                    onChange={(e) =>
+                                      setPersonalStart(e.target.value)
+                                    }
+                                    placeholder={
+                                      currentWorkHours?.start || "--:--"
+                                    }
+                                    className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                  />
+                                </div>
+                                {!personalStart && (
+                                  <div className="text-xs text-muted-foreground/60 mt-1">
+                                    ({t("companyDefault")}:{" "}
+                                    {currentWorkHours?.start || "—"})
+                                  </div>
+                                )}
+                              </div>
+                              <div>
+                                <div className="text-xs text-muted-foreground mb-1">
+                                  {t("personalWorkHours")} ({t("workEnd")})
+                                </div>
+                                <input
+                                  type="time"
+                                  value={personalEnd}
+                                  onChange={(e) =>
+                                    setPersonalEnd(e.target.value)
+                                  }
+                                  placeholder={currentWorkHours?.end || "--:--"}
+                                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                />
+                                {!personalEnd && (
+                                  <div className="text-xs text-muted-foreground/60 mt-1">
+                                    ({t("companyDefault")}:{" "}
+                                    {currentWorkHours?.end || "—"})
+                                  </div>
+                                )}
+                              </div>
+                              <div>
+                                <div className="text-xs text-muted-foreground mb-1">
+                                  {t("personalMinHours")}
+                                </div>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max="24"
+                                  step="0.5"
+                                  value={personalMinH}
+                                  onChange={(e) =>
+                                    setPersonalMinH(e.target.value)
+                                  }
+                                  placeholder={String(
+                                    company?.minDailyHours || 0,
+                                  )}
+                                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                />
+                                {!personalMinH && (
+                                  <div className="text-xs text-muted-foreground/60 mt-1">
+                                    ({t("companyDefault")}:{" "}
+                                    {company?.minDailyHours || 0}h)
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex gap-2 mt-3">
+                              <button
+                                type="button"
+                                data-ocid={`employees.save_button.${idx + 1}`}
+                                onClick={() => handleSavePersonalRules(emp.id)}
+                                disabled={savingPersonal}
+                                className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs px-4 py-2 rounded-lg transition-colors"
+                              >
+                                {savingPersonal ? t("loading") : t("save")}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setExpandedPersonalEmpId("")}
+                                className="border border-border text-muted-foreground text-xs px-4 py-2 rounded-lg hover:bg-muted transition-colors"
+                              >
+                                {t("cancel")}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
               </div>
             )}
           </div>
@@ -551,18 +1288,38 @@ export default function CompanyDashboard({
 
         {tab === "attendance" && (
           <div>
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-bold">{t("attendance")}</h2>
-              {attendance.length > 0 && (
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={handleExportCSV}
-                  className="flex items-center gap-2 border border-border hover:bg-muted text-sm font-medium px-4 py-2 rounded-xl transition-colors"
+                  onClick={() => setShowAddLeave(true)}
+                  className="flex items-center gap-2 border border-blue-500/40 text-blue-400 hover:bg-blue-500/10 text-sm font-medium px-3 py-2 rounded-xl transition-colors"
                 >
-                  <Download size={16} />
-                  {t("exportCSV")}
+                  <Plus size={14} />
+                  {t("addLeave")}
                 </button>
-              )}
+                {attendance.length > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleExportPDF}
+                      className="flex items-center gap-2 border border-border hover:bg-muted text-sm font-medium px-4 py-2 rounded-xl transition-colors"
+                    >
+                      <Download size={16} />
+                      {t("exportPDF")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleExportCSV}
+                      className="flex items-center gap-2 border border-border hover:bg-muted text-sm font-medium px-4 py-2 rounded-xl transition-colors"
+                    >
+                      <Download size={16} />
+                      {t("exportCSV")}
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
             <div className="bg-card border border-border rounded-xl p-4 mb-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
@@ -604,10 +1361,80 @@ export default function CompanyDashboard({
                   ))}
                 </select>
               </div>
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">
+                  {t("filterDepartment")}
+                </div>
+                <select
+                  value={filterDepartment}
+                  onChange={(e) => setFilterDepartment(e.target.value)}
+                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">{t("allDepartments")}</option>
+                  {getCompanyDepartments(session.id).map((dept) => (
+                    <option key={dept} value={dept}>
+                      {dept}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
-            {attendance.length === 0 ? (
+
+            {leaveRecords.length > 0 && (
+              <div className="mb-4">
+                <div className="text-sm font-semibold text-muted-foreground mb-2 px-1">
+                  {t("leaveType")}
+                </div>
+                <div className="space-y-2">
+                  {leaveRecords.map((lr) => (
+                    <div
+                      key={lr.id}
+                      className="bg-card border border-purple-500/30 rounded-xl p-3 flex items-center justify-between"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span
+                          className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                            lr.type === "leave"
+                              ? "bg-purple-500/20 text-purple-400"
+                              : lr.type === "sick"
+                                ? "bg-red-500/20 text-red-400"
+                                : "bg-yellow-500/20 text-yellow-400"
+                          }`}
+                        >
+                          {lr.type === "leave"
+                            ? t("leaveTypeLeave")
+                            : lr.type === "sick"
+                              ? t("leaveTypeSick")
+                              : t("leaveTypeExcuse")}
+                        </span>
+                        <span className="font-medium text-sm">
+                          {lr.employeeName}
+                        </span>
+                        <span className="text-muted-foreground text-xs">
+                          {lr.date}
+                        </span>
+                        {lr.note && (
+                          <span className="text-muted-foreground text-xs italic">
+                            {lr.note}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteLeave(lr.id)}
+                        className="p-1.5 hover:bg-red-500/10 rounded-lg text-red-400 transition-colors"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {attendance.length === 0 && leaveRecords.length === 0 ? (
               <EmptyState text={t("noRecords")} />
-            ) : (
+            ) : attendance.length > 0 ? (
               <div className="bg-card border border-border rounded-xl overflow-hidden">
                 <table className="w-full text-sm">
                   <thead>
@@ -627,51 +1454,823 @@ export default function CompanyDashboard({
                     </tr>
                   </thead>
                   <tbody>
-                    {attendance.map((rec) => {
-                      const dur = getRecordDuration(rec, allAttendance);
-                      return (
-                        <tr
-                          key={rec.id}
-                          className="border-b border-border last:border-0 hover:bg-muted/50 transition-colors"
-                        >
-                          <td className="px-4 py-3 font-medium">
-                            {rec.employeeName}
-                          </td>
-                          <td className="px-4 py-3">
-                            <span
-                              className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
-                                rec.recordType === "checkin"
-                                  ? "bg-green-500/20 text-green-400"
-                                  : "bg-gray-500/20 text-gray-400"
-                              }`}
-                            >
-                              <span
-                                className={`w-1.5 h-1.5 rounded-full ${rec.recordType === "checkin" ? "bg-green-400" : "bg-gray-400"}`}
-                              />
-                              {rec.recordType === "checkin"
-                                ? t("checkinType")
-                                : t("checkoutType")}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-muted-foreground">
-                            {formatDate(rec.timestamp)}
-                          </td>
-                          <td className="px-4 py-3 text-muted-foreground font-mono text-xs">
-                            {dur !== "-" ? (
-                              <span className="bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded">
-                                {dur}
-                              </span>
-                            ) : (
-                              "-"
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {attendance
+                      .filter((rec) => {
+                        if (!filterDepartment) return true;
+                        const recEmp = employees.find(
+                          (e) => e.id === rec.employeeId,
+                        );
+                        return (
+                          recEmp?.departments?.[session.id] === filterDepartment
+                        );
+                      })
+                      .map((rec) => {
+                        const dur = getRecordDuration(rec, allAttendance);
+                        const recEmp = employees.find(
+                          (e) => e.id === rec.employeeId,
+                        );
+                        const assignedShiftId =
+                          recEmp?.assignedShifts?.[session.id];
+                        const assignedShift = assignedShiftId
+                          ? (company?.shifts || []).find(
+                              (s) => s.id === assignedShiftId,
+                            )
+                          : undefined;
+                        // Personal work hours override > shift > company default
+                        const personalHours =
+                          recEmp?.personalWorkHours?.[session.id];
+                        const effectiveWorkHours = personalHours
+                          ? {
+                              start: personalHours.start,
+                              end: personalHours.end,
+                            }
+                          : assignedShift
+                            ? {
+                                start: assignedShift.startTime,
+                                end: assignedShift.endTime,
+                              }
+                            : currentWorkHours;
+                        const late =
+                          effectiveWorkHours && rec.recordType === "checkin"
+                            ? isLateCheckin(
+                                rec.timestamp,
+                                effectiveWorkHours.start,
+                              )
+                            : false;
+                        const early =
+                          effectiveWorkHours && rec.recordType === "checkout"
+                            ? isEarlyCheckout(
+                                rec.timestamp,
+                                effectiveWorkHours.end,
+                              )
+                            : false;
+                        const durMinutes = getRecordDurationMinutes(
+                          rec,
+                          allAttendance,
+                        );
+                        const empMinHours =
+                          recEmp?.personalMinHours?.[session.id] ??
+                          company?.minDailyHours ??
+                          0;
+                        const insufficientHours =
+                          rec.recordType === "checkout" &&
+                          empMinHours > 0 &&
+                          durMinutes > 0 &&
+                          durMinutes < empMinHours * 60;
+                        const overtime =
+                          effectiveWorkHours && rec.recordType === "checkout"
+                            ? getOvertimeMinutes(
+                                0,
+                                rec.timestamp,
+                                effectiveWorkHours.end,
+                              )
+                            : 0;
+                        return (
+                          <tr
+                            key={rec.id}
+                            className="border-b border-border last:border-0 hover:bg-muted/50 transition-colors"
+                          >
+                            <td className="px-4 py-3 font-medium">
+                              {rec.employeeName}
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span
+                                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
+                                    rec.recordType === "checkin"
+                                      ? "bg-green-500/20 text-green-400"
+                                      : "bg-gray-500/20 text-gray-400"
+                                  }`}
+                                >
+                                  <span
+                                    className={`w-1.5 h-1.5 rounded-full ${rec.recordType === "checkin" ? "bg-green-400" : "bg-gray-400"}`}
+                                  />
+                                  {rec.recordType === "checkin"
+                                    ? t("checkinType")
+                                    : t("checkoutType")}
+                                </span>
+                                {late && (
+                                  <span className="text-xs px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-400 font-medium">
+                                    {t("lateCheckin")}
+                                  </span>
+                                )}
+                                {early && (
+                                  <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-medium">
+                                    {t("earlyCheckout")}
+                                  </span>
+                                )}
+                                {insufficientHours && (
+                                  <span className="text-xs px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 font-medium">
+                                    {t("insufficientHours")}
+                                  </span>
+                                )}
+                                {overtime > 0 && (
+                                  <span className="text-xs px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-400 font-medium">
+                                    {t("overtime")}: {overtime}dk
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground">
+                              {formatDate(rec.timestamp)}
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground font-mono text-xs">
+                              {dur !== "-" ? (
+                                <span className="bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded">
+                                  {dur}
+                                </span>
+                              ) : (
+                                "-"
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </div>
+        )}
+
+        {tab === "summary" && (
+          <div>
+            <h2 className="text-xl font-bold mb-6">{t("summary")}</h2>
+            <div className="flex items-center gap-4 mb-6">
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">
+                  {t("selectMonth")}
+                </div>
+                <select
+                  value={summaryMonth}
+                  onChange={(e) => setSummaryMonth(Number(e.target.value))}
+                  className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none"
+                >
+                  {([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] as const).map(
+                    (m) => (
+                      <option key={m} value={m}>
+                        {new Date(2000, m, 1).toLocaleString(lang, {
+                          month: "long",
+                        })}
+                      </option>
+                    ),
+                  )}
+                </select>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">
+                  {t("selectYear")}
+                </div>
+                <select
+                  value={summaryYear}
+                  onChange={(e) => setSummaryYear(Number(e.target.value))}
+                  className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none"
+                >
+                  {[
+                    new Date().getFullYear() - 1,
+                    new Date().getFullYear(),
+                    new Date().getFullYear() + 1,
+                  ].map((y) => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            {summaryData.length === 0 ? (
+              <EmptyState text={t("noEmployees")} />
+            ) : (
+              <div className="bg-card border border-border rounded-xl overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className="text-left px-4 py-3 text-muted-foreground font-medium">
+                        {t("employee")}
+                      </th>
+                      <th className="text-left px-4 py-3 text-muted-foreground font-medium">
+                        {t("daysAttended")}
+                      </th>
+                      <th className="text-left px-4 py-3 text-muted-foreground font-medium">
+                        {t("daysAbsent")}
+                      </th>
+                      <th className="text-left px-4 py-3 text-muted-foreground font-medium">
+                        {t("leaveDays")}
+                      </th>
+                      <th className="text-left px-4 py-3 text-muted-foreground font-medium">
+                        {t("totalWorkHours")}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {summaryData.map((row) => (
+                      <tr
+                        key={row.employee.id}
+                        className="border-b border-border last:border-0 hover:bg-muted/50 transition-colors"
+                      >
+                        <td className="px-4 py-3 font-medium">
+                          {row.employee.fullName}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="bg-green-500/10 text-green-400 px-2 py-0.5 rounded text-xs font-mono">
+                            {row.daysAttended}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`px-2 py-0.5 rounded text-xs font-mono ${row.daysAbsent > 0 ? "bg-red-500/10 text-red-400" : "bg-muted text-muted-foreground"}`}
+                          >
+                            {row.daysAbsent}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="bg-purple-500/10 text-purple-400 px-2 py-0.5 rounded text-xs font-mono">
+                            {row.leaveDays}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 font-mono text-xs">
+                          {Math.floor(row.totalWorkMinutes / 60)}s{" "}
+                          {row.totalWorkMinutes % 60}d
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
             )}
+          </div>
+        )}
+
+        {tab === "statistics" && (
+          <div>
+            <h2 className="text-xl font-bold mb-6">{t("statistics")}</h2>
+            <div className="space-y-8">
+              {/* Weekly Trend */}
+              <div className="bg-card border border-border rounded-xl p-6">
+                <div className="font-semibold mb-4">{t("weeklyTrend")}</div>
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart
+                    data={getWeeklyTrendData()}
+                    margin={{ top: 0, right: 10, left: -10, bottom: 0 }}
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke="rgba(255,255,255,0.05)"
+                    />
+                    <XAxis
+                      dataKey="date"
+                      tick={{ fontSize: 11, fill: "#888" }}
+                    />
+                    <YAxis
+                      tick={{ fontSize: 11, fill: "#888" }}
+                      allowDecimals={false}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        background: "#1a1a2e",
+                        border: "1px solid rgba(255,255,255,0.1)",
+                        borderRadius: "8px",
+                        fontSize: 12,
+                      }}
+                      labelStyle={{ color: "#aaa" }}
+                    />
+                    <Bar
+                      dataKey="count"
+                      name={t("checkinsCount")}
+                      fill="#3b82f6"
+                      radius={[4, 4, 0, 0]}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Department Attendance Rate */}
+              <div className="bg-card border border-border rounded-xl p-6">
+                <div className="font-semibold mb-4">
+                  {t("departmentAttendance")}
+                </div>
+                {getDepartmentAttendanceData().length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground text-sm">
+                    {t("noEmployees")}
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={200}>
+                    <BarChart
+                      data={getDepartmentAttendanceData()}
+                      margin={{ top: 0, right: 10, left: -10, bottom: 0 }}
+                    >
+                      <CartesianGrid
+                        strokeDasharray="3 3"
+                        stroke="rgba(255,255,255,0.05)"
+                      />
+                      <XAxis
+                        dataKey="dept"
+                        tick={{ fontSize: 11, fill: "#888" }}
+                      />
+                      <YAxis
+                        tick={{ fontSize: 11, fill: "#888" }}
+                        domain={[0, 100]}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          background: "#1a1a2e",
+                          border: "1px solid rgba(255,255,255,0.1)",
+                          borderRadius: "8px",
+                          fontSize: 12,
+                        }}
+                        labelStyle={{ color: "#aaa" }}
+                      />
+                      <Bar
+                        dataKey="rate"
+                        name={t("attendanceRate")}
+                        fill="#22c55e"
+                        radius={[4, 4, 0, 0]}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+
+              {/* Top 5 Employees by Work Hours */}
+              <div className="bg-card border border-border rounded-xl p-6">
+                <div className="font-semibold mb-4">{t("topEmployees")}</div>
+                {getTopEmployeesData().length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground text-sm">
+                    {t("noRecords")}
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart
+                      data={getTopEmployeesData()}
+                      layout="vertical"
+                      margin={{ top: 0, right: 30, left: 10, bottom: 0 }}
+                    >
+                      <CartesianGrid
+                        strokeDasharray="3 3"
+                        stroke="rgba(255,255,255,0.05)"
+                      />
+                      <XAxis
+                        type="number"
+                        tick={{ fontSize: 11, fill: "#888" }}
+                      />
+                      <YAxis
+                        dataKey="name"
+                        type="category"
+                        tick={{ fontSize: 11, fill: "#888" }}
+                        width={60}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          background: "#1a1a2e",
+                          border: "1px solid rgba(255,255,255,0.1)",
+                          borderRadius: "8px",
+                          fontSize: 12,
+                        }}
+                        labelStyle={{ color: "#aaa" }}
+                      />
+                      <Bar
+                        dataKey="hours"
+                        name={t("workHoursLabel")}
+                        fill="#f97316"
+                        radius={[0, 4, 4, 0]}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {tab === "corrections" && (
+          <div>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold">{t("correctionRequests")}</h2>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCorrectionFilter("pending")}
+                  className={`text-sm px-3 py-1.5 rounded-lg border transition-colors ${
+                    correctionFilter === "pending"
+                      ? "bg-orange-500/20 border-orange-500/40 text-orange-400"
+                      : "border-border text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  {t("pending")} ({pendingCorrections.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCorrectionFilter("all")}
+                  className={`text-sm px-3 py-1.5 rounded-lg border transition-colors ${
+                    correctionFilter === "all"
+                      ? "bg-blue-500/20 border-blue-500/40 text-blue-400"
+                      : "border-border text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  {t("attendance")} ({correctionRequests.length})
+                </button>
+              </div>
+            </div>
+            {(() => {
+              const filtered =
+                correctionFilter === "pending"
+                  ? correctionRequests.filter((r) => r.status === "pending")
+                  : correctionRequests;
+              if (filtered.length === 0)
+                return <EmptyState text={t("noCorrectionRequests")} />;
+              return (
+                <div className="space-y-3">
+                  {filtered.map((req) => (
+                    <div
+                      key={req.id}
+                      className="bg-card border border-border rounded-xl p-4"
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-start gap-3">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-semibold text-sm">
+                              {req.employeeName}
+                            </span>
+                            <span
+                              className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                                req.status === "pending"
+                                  ? "bg-orange-500/20 text-orange-400"
+                                  : req.status === "approved"
+                                    ? "bg-green-500/20 text-green-400"
+                                    : "bg-red-500/20 text-red-400"
+                              }`}
+                            >
+                              {t(req.status)}
+                            </span>
+                            <span
+                              className={
+                                "text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground"
+                              }
+                            >
+                              {req.requestType === "checkin"
+                                ? t("checkinType")
+                                : t("checkoutType")}
+                            </span>
+                          </div>
+                          <div className="text-sm text-muted-foreground">
+                            <span className="font-mono">
+                              {req.requestedDate} {req.requestedTime}
+                            </span>
+                            {req.reason && (
+                              <span className="ml-3 italic">{req.reason}</span>
+                            )}
+                          </div>
+                          <div className="text-xs text-muted-foreground/60 mt-1">
+                            {formatDate(req.createdAt)}
+                          </div>
+                          {req.rejectionNote && (
+                            <div className="text-xs text-red-400 mt-1">
+                              {t("rejectionNote")}: {req.rejectionNote}
+                            </div>
+                          )}
+                        </div>
+                        {req.status === "pending" && (
+                          <div className="flex items-center gap-2">
+                            {rejectingId === req.id ? (
+                              <div className="flex flex-col gap-2">
+                                <input
+                                  type="text"
+                                  value={rejectionNote}
+                                  onChange={(e) =>
+                                    setRejectionNote(e.target.value)
+                                  }
+                                  placeholder={t("rejectionNote")}
+                                  className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-red-500 w-48"
+                                />
+                                <div className="flex gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleRejectCorrection(req.id)
+                                    }
+                                    className="text-xs px-3 py-1.5 bg-red-500/20 border border-red-500/40 text-red-400 rounded-lg hover:bg-red-500/30 transition-colors"
+                                  >
+                                    {t("reject")}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setRejectingId("");
+                                      setRejectionNote("");
+                                    }}
+                                    className="text-xs px-3 py-1.5 border border-border text-muted-foreground rounded-lg hover:bg-muted transition-colors"
+                                  >
+                                    {t("cancel")}
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  data-ocid="corrections.confirm_button"
+                                  onClick={() =>
+                                    handleApproveCorrection(req.id)
+                                  }
+                                  className="text-xs px-3 py-1.5 bg-green-500/20 border border-green-500/40 text-green-400 rounded-lg hover:bg-green-500/30 transition-colors"
+                                >
+                                  {t("approve")}
+                                </button>
+                                <button
+                                  type="button"
+                                  data-ocid="corrections.delete_button"
+                                  onClick={() => {
+                                    setRejectingId(req.id);
+                                    setRejectionNote("");
+                                  }}
+                                  className="text-xs px-3 py-1.5 bg-red-500/20 border border-red-500/40 text-red-400 rounded-lg hover:bg-red-500/30 transition-colors"
+                                >
+                                  {t("reject")}
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        {tab === "settings" && (
+          <div>
+            <h2 className="text-xl font-bold mb-6">{t("settings")}</h2>
+            <div className="bg-card border border-border rounded-xl p-6 max-w-md">
+              {/* Work Hours */}
+              <div className="text-base font-semibold mb-4">
+                {t("workHours")}
+              </div>
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                <div>
+                  <div className="text-sm font-medium mb-2 text-muted-foreground">
+                    {t("workStart")}
+                  </div>
+                  <input
+                    type="time"
+                    value={workStart}
+                    onChange={(e) => setWorkStart(e.target.value)}
+                    className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <div className="text-sm font-medium mb-2 text-muted-foreground">
+                    {t("workEnd")}
+                  </div>
+                  <input
+                    type="time"
+                    value={workEnd}
+                    onChange={(e) => setWorkEnd(e.target.value)}
+                    className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleSaveWorkHours}
+                disabled={savingWorkHours}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold py-3 rounded-xl transition-colors"
+              >
+                {savingWorkHours ? t("loading") : t("save")}
+              </button>
+              {currentWorkHours && (
+                <div className="mt-4 text-sm text-muted-foreground text-center">
+                  {t("workHours")}:{" "}
+                  <span className="font-mono text-blue-400">
+                    {currentWorkHours.start} – {currentWorkHours.end}
+                  </span>
+                </div>
+              )}
+
+              {/* Work Days */}
+              <div className="text-base font-semibold mb-4 mt-8">
+                {t("workDays")}
+              </div>
+              <div className="flex flex-wrap gap-2 mb-4">
+                {[
+                  { day: 1, key: "workDayMon" },
+                  { day: 2, key: "workDayTue" },
+                  { day: 3, key: "workDayWed" },
+                  { day: 4, key: "workDayThu" },
+                  { day: 5, key: "workDayFri" },
+                  { day: 6, key: "workDaySat" },
+                  { day: 0, key: "workDaySun" },
+                ].map(({ day, key }) => (
+                  <button
+                    key={day}
+                    type="button"
+                    onClick={() =>
+                      setWorkDays((prev) =>
+                        prev.includes(day)
+                          ? prev.filter((d) => d !== day)
+                          : [...prev, day],
+                      )
+                    }
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                      workDays.includes(day)
+                        ? "bg-blue-600 border-blue-600 text-white"
+                        : "border-border text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    {t(key)}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={handleSaveWorkDays}
+                disabled={savingWorkDays}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold py-3 rounded-xl transition-colors mb-6"
+              >
+                {savingWorkDays ? t("loading") : t("save")}
+              </button>
+
+              {/* Min Daily Hours */}
+              <div className="text-base font-semibold mb-4 mt-2">
+                {t("minDailyHours")}
+              </div>
+              <div className="flex gap-3 items-end mb-6">
+                <div className="flex-1">
+                  <input
+                    type="number"
+                    min="0"
+                    max="24"
+                    step="0.5"
+                    value={minDailyHoursValue}
+                    onChange={(e) => setMinDailyHoursValue(e.target.value)}
+                    className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="0"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSaveMinHours}
+                  disabled={savingMinHours}
+                  className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold px-5 py-3 rounded-xl transition-colors whitespace-nowrap"
+                >
+                  {savingMinHours ? t("loading") : t("save")}
+                </button>
+              </div>
+
+              {/* Shifts */}
+              <div className="text-base font-semibold mb-4 mt-2">
+                {t("shifts")}
+              </div>
+              {(company?.shifts || []).length > 0 && (
+                <div className="space-y-2 mb-4">
+                  {(company?.shifts || []).map((sh) => (
+                    <div
+                      key={sh.id}
+                      className="flex items-center justify-between bg-muted/40 border border-border rounded-xl px-4 py-3"
+                    >
+                      <div>
+                        <span className="font-medium text-sm">{sh.name}</span>
+                        <span className="ml-3 text-xs text-muted-foreground font-mono">
+                          {sh.startTime} – {sh.endTime}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteShift(sh.id)}
+                        className="p-1.5 hover:bg-red-500/10 text-red-400 rounded-lg transition-colors"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="grid grid-cols-1 gap-3 mb-3">
+                <input
+                  type="text"
+                  value={newShiftName}
+                  onChange={(e) => setNewShiftName(e.target.value)}
+                  placeholder={t("shiftName")}
+                  className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <div className="grid grid-cols-2 gap-3">
+                  <input
+                    type="time"
+                    value={newShiftStart}
+                    onChange={(e) => setNewShiftStart(e.target.value)}
+                    className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <input
+                    type="time"
+                    value={newShiftEnd}
+                    onChange={(e) => setNewShiftEnd(e.target.value)}
+                    className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleAddShift}
+                className="flex items-center gap-2 w-full justify-center bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl transition-colors mb-8"
+              >
+                <Plus size={16} />
+                {t("addShift")}
+              </button>
+
+              {/* Public Holidays */}
+              <div className="text-base font-semibold mb-4 mt-2 flex items-center gap-2">
+                <Calendar size={16} />
+                {t("holidays")}
+              </div>
+              {holidays.length > 0 && (
+                <div className="space-y-2 mb-4">
+                  {holidays.map((h) => (
+                    <div
+                      key={h.id}
+                      className="flex items-center justify-between bg-muted/40 border border-border rounded-xl px-4 py-3"
+                    >
+                      <div>
+                        <span className="font-medium text-sm">{h.name}</span>
+                        <span className="ml-3 text-xs text-muted-foreground font-mono">
+                          {h.date}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteHoliday(h.id)}
+                        className="p-1.5 hover:bg-red-500/10 text-red-400 rounded-lg transition-colors"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {holidays.length === 0 && (
+                <div className="text-sm text-muted-foreground text-center py-3 mb-3">
+                  {t("noHolidays")}
+                </div>
+              )}
+              <div className="grid grid-cols-1 gap-3 mb-3">
+                <input
+                  type="date"
+                  value={newHolidayDate}
+                  onChange={(e) => setNewHolidayDate(e.target.value)}
+                  className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder={t("holidayDate")}
+                />
+                <input
+                  type="text"
+                  value={newHolidayName}
+                  onChange={(e) => setNewHolidayName(e.target.value)}
+                  placeholder={t("holidayName")}
+                  className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onKeyDown={(e) => e.key === "Enter" && handleAddHoliday()}
+                />
+              </div>
+              <button
+                type="button"
+                data-ocid="holidays.primary_button"
+                onClick={handleAddHoliday}
+                className="flex items-center gap-2 w-full justify-center bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl transition-colors mb-8"
+              >
+                <Plus size={16} />
+                {t("addHoliday")}
+              </button>
+
+              {/* Data Backup & Restore */}
+              <div className="text-base font-semibold mb-4 mt-2">
+                {t("dataBackup")}
+              </div>
+              <div className="space-y-3">
+                <button
+                  type="button"
+                  onClick={handleExportBackup}
+                  className="flex items-center gap-2 w-full justify-center border border-border hover:bg-muted text-sm font-medium py-3 rounded-xl transition-colors"
+                >
+                  <Database size={16} />
+                  {t("backupData")}
+                </button>
+                <label className="flex items-center gap-2 w-full justify-center border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 text-sm font-medium py-3 rounded-xl transition-colors cursor-pointer">
+                  <Upload size={16} />
+                  {t("restoreData")}
+                  <input
+                    type="file"
+                    accept=".json"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        setRestoreFile(file);
+                        setShowRestoreConfirm(true);
+                      }
+                    }}
+                  />
+                </label>
+              </div>
+            </div>
           </div>
         )}
       </main>
@@ -767,6 +2366,141 @@ export default function CompanyDashboard({
                 </div>
               </div>
             )}
+          </div>
+        </dialog>
+      )}
+
+      {showRestoreConfirm && (
+        <dialog
+          open
+          className="fixed inset-0 bg-black/60 flex items-center justify-center p-6 z-50 m-0 max-w-none w-full h-full bg-transparent border-0"
+        >
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: modal backdrop */}
+          <div
+            className="fixed inset-0"
+            onClick={() => {
+              setShowRestoreConfirm(false);
+              setRestoreFile(null);
+            }}
+          />
+          <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-md shadow-2xl relative z-10">
+            <div className="flex items-center gap-3 mb-4">
+              <AlertTriangle size={20} className="text-amber-400" />
+              <h3 className="text-lg font-bold">{t("restoreData")}</h3>
+            </div>
+            <p className="text-sm text-muted-foreground mb-6">
+              {t("restoreConfirm")}
+            </p>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRestoreConfirm(false);
+                  setRestoreFile(null);
+                }}
+                className="flex-1 border border-border py-3 rounded-xl text-sm font-medium hover:bg-muted transition-colors"
+              >
+                {t("cancel")}
+              </button>
+              <button
+                type="button"
+                onClick={handleRestoreBackup}
+                className="flex-1 bg-amber-500 hover:bg-amber-600 text-white py-3 rounded-xl text-sm font-semibold transition-colors"
+              >
+                {t("restoreData")}
+              </button>
+            </div>
+          </div>
+        </dialog>
+      )}
+
+      {showAddLeave && (
+        <dialog
+          open
+          className="fixed inset-0 bg-black/60 flex items-center justify-center p-6 z-50 m-0 max-w-none w-full h-full bg-transparent border-0"
+        >
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: modal backdrop */}
+          <div
+            className="fixed inset-0"
+            onClick={() => setShowAddLeave(false)}
+          />
+          <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-md shadow-2xl relative z-10">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-bold">{t("addLeave")}</h3>
+              <button
+                type="button"
+                onClick={() => setShowAddLeave(false)}
+                className="p-1 hover:bg-muted rounded-lg transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <div className="text-sm font-medium mb-2">{t("employee")}</div>
+                <select
+                  value={leaveEmpId}
+                  onChange={(e) => setLeaveEmpId(e.target.value)}
+                  className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">{t("allEmployees")}</option>
+                  {employees.map((e) => (
+                    <option key={e.id} value={e.id}>
+                      {e.fullName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <div className="text-sm font-medium mb-2">{t("date")}</div>
+                <input
+                  type="date"
+                  value={leaveDate}
+                  onChange={(e) => setLeaveDate(e.target.value)}
+                  className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <div className="text-sm font-medium mb-2">{t("leaveType")}</div>
+                <select
+                  value={leaveType}
+                  onChange={(e) =>
+                    setLeaveType(e.target.value as LeaveRecord["type"])
+                  }
+                  className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="leave">{t("leaveTypeLeave")}</option>
+                  <option value="sick">{t("leaveTypeSick")}</option>
+                  <option value="excuse">{t("leaveTypeExcuse")}</option>
+                </select>
+              </div>
+              <div>
+                <div className="text-sm font-medium mb-2">{t("leaveNote")}</div>
+                <input
+                  type="text"
+                  value={leaveNote}
+                  onChange={(e) => setLeaveNote(e.target.value)}
+                  className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddLeave(false)}
+                  className="flex-1 border border-border py-3 rounded-xl text-sm font-medium hover:bg-muted transition-colors"
+                >
+                  {t("cancel")}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAddLeave}
+                  disabled={savingLeave}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-3 rounded-xl text-sm font-semibold transition-colors"
+                >
+                  {savingLeave ? t("loading") : t("create")}
+                </button>
+              </div>
+            </div>
           </div>
         </dialog>
       )}

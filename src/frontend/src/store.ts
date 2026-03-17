@@ -1,12 +1,23 @@
 // localStorage-based data store for StafFlow
 // All data is stored in localStorage since backend IDL is unavailable
 
+export interface Shift {
+  id: string;
+  name: string;
+  startTime: string; // HH:MM
+  endTime: string; // HH:MM
+}
+
 export interface Company {
   id: string;
   name: string;
   authorizedPerson?: string;
   loginCode: string;
   createdAt: number;
+  workHours?: { start: string; end: string };
+  workDays?: number[]; // 0=Sun,1=Mon...6=Sat, default [1,2,3,4,5]
+  shifts?: Shift[]; // named shifts
+  minDailyHours?: number; // minimum required daily work hours (0 = disabled)
 }
 
 export interface Employee {
@@ -16,6 +27,11 @@ export interface Employee {
   loginCode: string;
   companyIds: string[];
   createdAt: number;
+  departments?: Record<string, string>; // companyId -> department name
+  activeInCompanies?: Record<string, boolean>; // companyId -> active status (undefined/true = active)
+  assignedShifts?: Record<string, string>; // companyId -> shiftId
+  personalWorkHours?: Record<string, { start: string; end: string }>; // companyId -> hours
+  personalMinHours?: Record<string, number>; // companyId -> min hours
 }
 
 export interface InviteCode {
@@ -38,12 +54,47 @@ export interface AttendanceRecord {
   timestamp: number;
 }
 
+export interface LeaveRecord {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  employeeName: string;
+  date: string; // YYYY-MM-DD
+  type: "leave" | "sick" | "excuse";
+  note?: string;
+  createdAt: number;
+}
+
+export interface PublicHoliday {
+  id: string;
+  companyId: string;
+  date: string; // YYYY-MM-DD
+  name: string;
+}
+
+export interface CorrectionRequest {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  employeeName: string;
+  requestType: "checkin" | "checkout";
+  requestedDate: string; // YYYY-MM-DD
+  requestedTime: string; // HH:MM
+  reason: string;
+  status: "pending" | "approved" | "rejected";
+  rejectionNote?: string;
+  createdAt: number;
+}
+
 const KEYS = {
   companies: "sf_companies",
   employees: "sf_employees",
   inviteCodes: "sf_invite_codes",
   attendance: "sf_attendance",
+  leaveRecords: "sf_leave_records",
   idCounter: "sf_id_counter",
+  holidays: "sf_holidays",
+  correctionRequests: "sf_correction_requests",
 };
 
 function load<T>(key: string): T[] {
@@ -112,13 +163,153 @@ export function getRecordDuration(
   return formatDuration(paired.timestamp, record.timestamp);
 }
 
+export function getRecordDurationMinutes(
+  record: AttendanceRecord,
+  allRecords: AttendanceRecord[],
+): number {
+  if (record.recordType !== "checkout") return 0;
+  const paired = allRecords
+    .filter(
+      (r) =>
+        r.employeeId === record.employeeId &&
+        r.companyId === record.companyId &&
+        r.recordType === "checkin" &&
+        r.timestamp < record.timestamp,
+    )
+    .sort((a, b) => b.timestamp - a.timestamp)[0];
+  if (!paired) return 0;
+  return Math.max(0, Math.floor((record.timestamp - paired.timestamp) / 60000));
+}
+
+// ===== WORK HOURS HELPERS =====
+
+export function isLateCheckin(timestamp: number, workStart: string): boolean {
+  const date = new Date(timestamp);
+  const [startHour, startMinute] = workStart.split(":").map(Number);
+  const recordMinutes = date.getHours() * 60 + date.getMinutes();
+  const startMinutes = startHour * 60 + startMinute;
+  return recordMinutes > startMinutes;
+}
+
+export function isEarlyCheckout(timestamp: number, workEnd: string): boolean {
+  const date = new Date(timestamp);
+  const [endHour, endMinute] = workEnd.split(":").map(Number);
+  const recordMinutes = date.getHours() * 60 + date.getMinutes();
+  const endMinutes = endHour * 60 + endMinute;
+  return recordMinutes < endMinutes;
+}
+
+// ===== MONTHLY SUMMARY =====
+
+export interface MonthlySummaryRow {
+  employee: Employee;
+  daysAttended: number;
+  daysAbsent: number;
+  totalWorkMinutes: number;
+  leaveDays: number;
+}
+
+export function getMonthlyAttendanceSummary(
+  companyId: string,
+  year: number,
+  month: number, // 0-based
+): MonthlySummaryRow[] {
+  const employees = load<Employee>(KEYS.employees).filter((e) =>
+    e.companyIds.includes(companyId),
+  );
+  const allRecords = load<AttendanceRecord>(KEYS.attendance).filter(
+    (r) => r.companyId === companyId,
+  );
+  const leaveRecords = load<LeaveRecord>(KEYS.leaveRecords).filter(
+    (l) => l.companyId === companyId,
+  );
+  const holidays = load<PublicHoliday>(KEYS.holidays).filter(
+    (h) => h.companyId === companyId,
+  );
+
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const company = load<Company>(KEYS.companies).find((c) => c.id === companyId);
+  const workDays = company?.workDays ?? [1, 2, 3, 4, 5];
+
+  // Build set of holiday date strings in this month
+  const holidayDates = new Set<string>();
+  for (const h of holidays) {
+    const d = new Date(h.date);
+    if (d.getFullYear() === year && d.getMonth() === month) {
+      holidayDates.add(h.date);
+    }
+  }
+
+  let workingDays = 0;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateObj = new Date(year, month, d);
+    const day = dateObj.getDay();
+    // Pad month/day to YYYY-MM-DD
+    const mm = String(month + 1).padStart(2, "0");
+    const dd = String(d).padStart(2, "0");
+    const dateStr = `${year}-${mm}-${dd}`;
+    if (workDays.includes(day) && !holidayDates.has(dateStr)) workingDays++;
+  }
+
+  return employees.map((emp) => {
+    const empRecords = allRecords.filter((r) => r.employeeId === emp.id);
+
+    const attendedDates = new Set<string>();
+    let totalWorkMinutes = 0;
+
+    const checkins = empRecords
+      .filter((r) => r.recordType === "checkin")
+      .filter((r) => {
+        const d = new Date(r.timestamp);
+        return d.getFullYear() === year && d.getMonth() === month;
+      });
+
+    for (const checkin of checkins) {
+      const dateStr = new Date(checkin.timestamp).toDateString();
+      attendedDates.add(dateStr);
+
+      const checkout = empRecords
+        .filter(
+          (r) => r.recordType === "checkout" && r.timestamp > checkin.timestamp,
+        )
+        .sort((a, b) => a.timestamp - b.timestamp)[0];
+
+      if (checkout) {
+        totalWorkMinutes += Math.floor(
+          (checkout.timestamp - checkin.timestamp) / 60000,
+        );
+      }
+    }
+
+    const empLeaves = leaveRecords.filter((l) => {
+      if (l.employeeId !== emp.id) return false;
+      const d = new Date(l.date);
+      return d.getFullYear() === year && d.getMonth() === month;
+    });
+
+    const daysAttended = attendedDates.size;
+    const leaveDays = empLeaves.length;
+    const daysAbsent = Math.max(0, workingDays - daysAttended - leaveDays);
+
+    return {
+      employee: emp,
+      daysAttended,
+      daysAbsent,
+      totalWorkMinutes,
+      leaveDays,
+    };
+  });
+}
+
 // ===== LIVE STATUS =====
 
 export function getCheckedInEmployees(
   companyId: string,
 ): { employee: Employee; checkinTimestamp: number }[] {
-  const employees = load<Employee>(KEYS.employees).filter((e) =>
-    e.companyIds.includes(companyId),
+  const employees = load<Employee>(KEYS.employees).filter(
+    (e) =>
+      e.companyIds.includes(companyId) &&
+      e.activeInCompanies?.[companyId] !== false,
   );
   const result: { employee: Employee; checkinTimestamp: number }[] = [];
   for (const emp of employees) {
@@ -131,8 +322,10 @@ export function getCheckedInEmployees(
 }
 
 export function getCheckedOutEmployees(companyId: string): Employee[] {
-  const employees = load<Employee>(KEYS.employees).filter((e) =>
-    e.companyIds.includes(companyId),
+  const employees = load<Employee>(KEYS.employees).filter(
+    (e) =>
+      e.companyIds.includes(companyId) &&
+      e.activeInCompanies?.[companyId] !== false,
   );
   return employees.filter((emp) => {
     const status = getLastAttendanceStatus(emp.id, companyId);
@@ -178,6 +371,322 @@ export function loginCompany(loginCode: string): {
   const company = companies.find((c) => c.loginCode === loginCode.trim());
   if (!company) return { ok: false, message: "Invalid login code" };
   return { ok: true, company, message: "Login successful" };
+}
+
+export function updateCompanyWorkHours(
+  companyId: string,
+  start: string,
+  end: string,
+): { ok: boolean; message: string } {
+  const companies = load<Company>(KEYS.companies);
+  const idx = companies.findIndex((c) => c.id === companyId);
+  if (idx === -1) return { ok: false, message: "Company not found" };
+  companies[idx].workHours = { start, end };
+  save(KEYS.companies, companies);
+  return { ok: true, message: "Work hours updated" };
+}
+
+export function updateCompanyWorkDays(
+  companyId: string,
+  workDays: number[],
+): { ok: boolean; message: string } {
+  const companies = load<Company>(KEYS.companies);
+  const idx = companies.findIndex((c) => c.id === companyId);
+  if (idx === -1) return { ok: false, message: "Company not found" };
+  companies[idx].workDays = workDays;
+  save(KEYS.companies, companies);
+  return { ok: true, message: "Work days updated" };
+}
+
+export function updateCompanyShifts(
+  companyId: string,
+  shifts: Shift[],
+): { ok: boolean; message: string } {
+  const companies = load<Company>(KEYS.companies);
+  const idx = companies.findIndex((c) => c.id === companyId);
+  if (idx === -1) return { ok: false, message: "Company not found" };
+  companies[idx].shifts = shifts;
+  save(KEYS.companies, companies);
+  return { ok: true, message: "Shifts updated" };
+}
+
+export function updateCompanyMinHours(
+  companyId: string,
+  minDailyHours: number,
+): { ok: boolean; message: string } {
+  const companies = load<Company>(KEYS.companies);
+  const idx = companies.findIndex((c) => c.id === companyId);
+  if (idx === -1) return { ok: false, message: "Company not found" };
+  companies[idx].minDailyHours = minDailyHours;
+  save(KEYS.companies, companies);
+  return { ok: true, message: "Min daily hours updated" };
+}
+
+export function getOvertimeMinutes(
+  _checkinTs: number,
+  checkoutTs: number,
+  workEnd: string,
+): number {
+  const checkout = new Date(checkoutTs);
+  const [endHour, endMinute] = workEnd.split(":").map(Number);
+  const workEndTs = new Date(checkout);
+  workEndTs.setHours(endHour, endMinute, 0, 0);
+  if (checkoutTs > workEndTs.getTime()) {
+    return Math.floor((checkoutTs - workEndTs.getTime()) / 60000);
+  }
+  return 0;
+}
+
+export function updateEmployeeDepartment(
+  employeeId: string,
+  companyId: string,
+  department: string,
+): { ok: boolean; message: string } {
+  const employees = load<Employee>(KEYS.employees);
+  const idx = employees.findIndex((e) => e.id === employeeId);
+  if (idx === -1) return { ok: false, message: "Employee not found" };
+  if (!employees[idx].departments) employees[idx].departments = {};
+  (employees[idx].departments as Record<string, string>)[companyId] =
+    department.trim();
+  save(KEYS.employees, employees);
+  return { ok: true, message: "Department updated" };
+}
+
+export function toggleEmployeeActive(
+  employeeId: string,
+  companyId: string,
+): { ok: boolean; active: boolean; message: string } {
+  const employees = load<Employee>(KEYS.employees);
+  const idx = employees.findIndex((e) => e.id === employeeId);
+  if (idx === -1)
+    return { ok: false, active: true, message: "Employee not found" };
+  if (!employees[idx].activeInCompanies) employees[idx].activeInCompanies = {};
+  const current = (employees[idx].activeInCompanies as Record<string, boolean>)[
+    companyId
+  ];
+  const newActive = current === false;
+  (employees[idx].activeInCompanies as Record<string, boolean>)[companyId] =
+    newActive;
+  save(KEYS.employees, employees);
+  return {
+    ok: true,
+    active: newActive,
+    message: newActive ? "Activated" : "Deactivated",
+  };
+}
+
+export function assignEmployeeShift(
+  employeeId: string,
+  companyId: string,
+  shiftId: string,
+): { ok: boolean; message: string } {
+  const employees = load<Employee>(KEYS.employees);
+  const idx = employees.findIndex((e) => e.id === employeeId);
+  if (idx === -1) return { ok: false, message: "Employee not found" };
+  if (!employees[idx].assignedShifts) employees[idx].assignedShifts = {};
+  if (shiftId) {
+    (employees[idx].assignedShifts as Record<string, string>)[companyId] =
+      shiftId;
+  } else {
+    delete (employees[idx].assignedShifts as Record<string, string>)[companyId];
+  }
+  save(KEYS.employees, employees);
+  return { ok: true, message: "Shift assigned" };
+}
+
+export function getCompanyDepartments(companyId: string): string[] {
+  const employees = load<Employee>(KEYS.employees).filter((e) =>
+    e.companyIds.includes(companyId),
+  );
+  const depts = new Set<string>();
+  for (const emp of employees) {
+    const dept = emp.departments?.[companyId];
+    if (dept) depts.add(dept);
+  }
+  return Array.from(depts).sort();
+}
+
+export function updateEmployeePersonalWorkHours(
+  employeeId: string,
+  companyId: string,
+  start: string,
+  end: string,
+): { ok: boolean; message: string } {
+  const employees = load<Employee>(KEYS.employees);
+  const idx = employees.findIndex((e) => e.id === employeeId);
+  if (idx === -1) return { ok: false, message: "Employee not found" };
+  if (!employees[idx].personalWorkHours) employees[idx].personalWorkHours = {};
+  (
+    employees[idx].personalWorkHours as Record<
+      string,
+      { start: string; end: string }
+    >
+  )[companyId] = { start, end };
+  save(KEYS.employees, employees);
+  return { ok: true, message: "Personal work hours updated" };
+}
+
+export function clearEmployeePersonalWorkHours(
+  employeeId: string,
+  companyId: string,
+): { ok: boolean; message: string } {
+  const employees = load<Employee>(KEYS.employees);
+  const idx = employees.findIndex((e) => e.id === employeeId);
+  if (idx === -1) return { ok: false, message: "Employee not found" };
+  if (employees[idx].personalWorkHours) {
+    delete (employees[idx].personalWorkHours as Record<string, unknown>)[
+      companyId
+    ];
+  }
+  save(KEYS.employees, employees);
+  return { ok: true, message: "Personal work hours cleared" };
+}
+
+export function updateEmployeePersonalMinHours(
+  employeeId: string,
+  companyId: string,
+  hours: number,
+): { ok: boolean; message: string } {
+  const employees = load<Employee>(KEYS.employees);
+  const idx = employees.findIndex((e) => e.id === employeeId);
+  if (idx === -1) return { ok: false, message: "Employee not found" };
+  if (!employees[idx].personalMinHours) employees[idx].personalMinHours = {};
+  (employees[idx].personalMinHours as Record<string, number>)[companyId] =
+    hours;
+  save(KEYS.employees, employees);
+  return { ok: true, message: "Personal min hours updated" };
+}
+
+// ===== PUBLIC HOLIDAYS =====
+
+export function addPublicHoliday(
+  companyId: string,
+  date: string,
+  name: string,
+): { ok: boolean; message: string } {
+  if (!date || !name.trim())
+    return { ok: false, message: "Date and name required" };
+  const holidays = load<PublicHoliday>(KEYS.holidays);
+  const id = nextId();
+  holidays.push({ id, companyId, date, name: name.trim() });
+  save(KEYS.holidays, holidays);
+  return { ok: true, message: "Holiday added" };
+}
+
+export function deletePublicHoliday(
+  id: string,
+  companyId: string,
+): { ok: boolean; message: string } {
+  const holidays = load<PublicHoliday>(KEYS.holidays);
+  const idx = holidays.findIndex(
+    (h) => h.id === id && h.companyId === companyId,
+  );
+  if (idx === -1) return { ok: false, message: "Not found" };
+  holidays.splice(idx, 1);
+  save(KEYS.holidays, holidays);
+  return { ok: true, message: "Deleted" };
+}
+
+export function getCompanyHolidays(companyId: string): PublicHoliday[] {
+  return load<PublicHoliday>(KEYS.holidays)
+    .filter((h) => h.companyId === companyId)
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+// ===== CORRECTION REQUESTS =====
+
+export function addCorrectionRequest(
+  companyId: string,
+  employeeId: string,
+  requestType: "checkin" | "checkout",
+  requestedDate: string,
+  requestedTime: string,
+  reason: string,
+): { ok: boolean; message: string } {
+  const employee = getEmployee(employeeId);
+  if (!employee) return { ok: false, message: "Employee not found" };
+  const id = nextId();
+  const req: CorrectionRequest = {
+    id,
+    companyId,
+    employeeId,
+    employeeName: employee.fullName,
+    requestType,
+    requestedDate,
+    requestedTime,
+    reason: reason.trim(),
+    status: "pending",
+    createdAt: Date.now(),
+  };
+  const requests = load<CorrectionRequest>(KEYS.correctionRequests);
+  requests.push(req);
+  save(KEYS.correctionRequests, requests);
+  return { ok: true, message: "Correction request submitted" };
+}
+
+export function getCompanyCorrectionRequests(
+  companyId: string,
+): CorrectionRequest[] {
+  return load<CorrectionRequest>(KEYS.correctionRequests)
+    .filter((r) => r.companyId === companyId)
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export function getEmployeeCorrectionRequests(
+  employeeId: string,
+  companyId: string,
+): CorrectionRequest[] {
+  return load<CorrectionRequest>(KEYS.correctionRequests)
+    .filter((r) => r.employeeId === employeeId && r.companyId === companyId)
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export function approveCorrectionRequest(
+  id: string,
+  companyId: string,
+): { ok: boolean; message: string } {
+  const requests = load<CorrectionRequest>(KEYS.correctionRequests);
+  const idx = requests.findIndex(
+    (r) => r.id === id && r.companyId === companyId,
+  );
+  if (idx === -1) return { ok: false, message: "Not found" };
+  const req = requests[idx];
+
+  // Create an attendance record
+  const recordDate = new Date(`${req.requestedDate}T${req.requestedTime}:00`);
+  const timestamp = recordDate.getTime();
+  const recId = nextId();
+  const record: AttendanceRecord = {
+    id: recId,
+    employeeId: req.employeeId,
+    employeeName: req.employeeName,
+    companyId: req.companyId,
+    recordType: req.requestType,
+    timestamp,
+  };
+  const all = load<AttendanceRecord>(KEYS.attendance);
+  all.push(record);
+  save(KEYS.attendance, all);
+
+  requests[idx].status = "approved";
+  save(KEYS.correctionRequests, requests);
+  return { ok: true, message: "Approved" };
+}
+
+export function rejectCorrectionRequest(
+  id: string,
+  companyId: string,
+  rejectionNote?: string,
+): { ok: boolean; message: string } {
+  const requests = load<CorrectionRequest>(KEYS.correctionRequests);
+  const idx = requests.findIndex(
+    (r) => r.id === id && r.companyId === companyId,
+  );
+  if (idx === -1) return { ok: false, message: "Not found" };
+  requests[idx].status = "rejected";
+  requests[idx].rejectionNote = rejectionNote?.trim() || undefined;
+  save(KEYS.correctionRequests, requests);
+  return { ok: true, message: "Rejected" };
 }
 
 export function createInviteCode(
@@ -267,6 +776,101 @@ export function getDailyCheckinCount(
   ).length;
 }
 
+// ===== LEAVE RECORDS =====
+
+export function addLeaveRecord(
+  companyId: string,
+  employeeId: string,
+  date: string,
+  type: LeaveRecord["type"],
+  note?: string,
+): { ok: boolean; message: string } {
+  const employee = getEmployee(employeeId);
+  if (!employee) return { ok: false, message: "Employee not found" };
+  const id = nextId();
+  const record: LeaveRecord = {
+    id,
+    companyId,
+    employeeId,
+    employeeName: employee.fullName,
+    date,
+    type,
+    note: note?.trim() || undefined,
+    createdAt: Date.now(),
+  };
+  const records = load<LeaveRecord>(KEYS.leaveRecords);
+  records.push(record);
+  save(KEYS.leaveRecords, records);
+  return { ok: true, message: "Leave record added" };
+}
+
+export function getCompanyLeaveRecords(
+  companyId: string,
+  fromDate?: string,
+  toDate?: string,
+  employeeId?: string,
+): LeaveRecord[] {
+  return load<LeaveRecord>(KEYS.leaveRecords)
+    .filter((l) => {
+      if (l.companyId !== companyId) return false;
+      if (fromDate && l.date < fromDate) return false;
+      if (toDate && l.date > toDate) return false;
+      if (employeeId && l.employeeId !== employeeId) return false;
+      return true;
+    })
+    .sort((a, b) => b.date.localeCompare(a.date));
+}
+
+export function deleteLeaveRecord(
+  id: string,
+  companyId: string,
+): { ok: boolean; message: string } {
+  const records = load<LeaveRecord>(KEYS.leaveRecords);
+  const idx = records.findIndex(
+    (l) => l.id === id && l.companyId === companyId,
+  );
+  if (idx === -1) return { ok: false, message: "Not found" };
+  records.splice(idx, 1);
+  save(KEYS.leaveRecords, records);
+  return { ok: true, message: "Deleted" };
+}
+
+// ===== BACKUP / RESTORE =====
+
+export function exportAllData(): string {
+  const data: Record<string, unknown> = {};
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key?.startsWith("sf_")) {
+      data[key] = localStorage.getItem(key);
+    }
+  }
+  return JSON.stringify(data, null, 2);
+}
+
+export function importAllData(jsonStr: string): {
+  ok: boolean;
+  message: string;
+} {
+  try {
+    const data = JSON.parse(jsonStr) as Record<string, string>;
+    const toRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith("sf_")) toRemove.push(key);
+    }
+    for (const key of toRemove) localStorage.removeItem(key);
+    for (const [key, value] of Object.entries(data)) {
+      if (key.startsWith("sf_") && typeof value === "string") {
+        localStorage.setItem(key, value);
+      }
+    }
+    return { ok: true, message: "Data imported successfully" };
+  } catch {
+    return { ok: false, message: "Invalid backup file" };
+  }
+}
+
 // ===== EMPLOYEE =====
 
 export function registerEmployee(
@@ -315,6 +919,21 @@ export function loginEmployee(loginCode: string): {
 
 export function getEmployee(id: string): Employee | undefined {
   return load<Employee>(KEYS.employees).find((e) => e.id === id);
+}
+
+export function updateEmployee(
+  id: string,
+  fullName: string,
+  phone?: string,
+): { ok: boolean; employee?: Employee; message: string } {
+  if (!fullName.trim()) return { ok: false, message: "Full name required" };
+  const employees = load<Employee>(KEYS.employees);
+  const idx = employees.findIndex((e) => e.id === id);
+  if (idx === -1) return { ok: false, message: "Employee not found" };
+  employees[idx].fullName = fullName.trim();
+  employees[idx].phone = phone?.trim() || undefined;
+  save(KEYS.employees, employees);
+  return { ok: true, employee: employees[idx], message: "Employee updated" };
 }
 
 export function getCompany(id: string): Company | undefined {
@@ -384,6 +1003,15 @@ export function toggleAttendance(
     };
   if (!employee.companyIds.includes(companyId))
     return { ok: false, recordType: "", timestamp: 0, message: "Not a member" };
+
+  if (employee.activeInCompanies?.[companyId] === false) {
+    return {
+      ok: false,
+      recordType: "",
+      timestamp: 0,
+      message: "Employee is inactive",
+    };
+  }
 
   const records = load<AttendanceRecord>(KEYS.attendance)
     .filter((r) => r.employeeId === employeeId && r.companyId === companyId)

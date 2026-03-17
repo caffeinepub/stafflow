@@ -1,8 +1,10 @@
 import {
   Camera,
+  ClipboardList,
   Clock,
   LogOut,
   Moon,
+  Pencil,
   Plus,
   QrCode,
   Sun,
@@ -17,14 +19,18 @@ import { useQRScanner } from "../qr-code/useQRScanner";
 import {
   type AttendanceRecord,
   type Company,
+  type CorrectionRequest,
   type Employee,
+  addCorrectionRequest,
   getCompany,
   getEmployee,
   getEmployeeAttendance,
+  getEmployeeCorrectionRequests,
   getLastAttendanceStatus,
   getRecordDuration,
   joinCompany,
   toggleAttendance,
+  updateEmployee,
 } from "../store";
 
 interface Props {
@@ -38,7 +44,7 @@ interface Props {
   onLogout: () => void;
 }
 
-type Tab = "companies" | "history" | "qr";
+type Tab = "companies" | "history" | "qr" | "corrections";
 
 function formatDate(ts: number) {
   return new Date(ts).toLocaleString();
@@ -77,6 +83,26 @@ export default function EmployeeDashboard({
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
 
+  // Profile edit state
+  const [showEditProfile, setShowEditProfile] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [savingProfile, setSavingProfile] = useState(false);
+
+  // Correction requests
+  const [correctionRequests, setCorrectionRequests] = useState<
+    CorrectionRequest[]
+  >([]);
+  const [showAddCorrection, setShowAddCorrection] = useState(false);
+  const [corrCompanyId, setCorrCompanyId] = useState("");
+  const [corrRequestType, setCorrRequestType] = useState<
+    "checkin" | "checkout"
+  >("checkin");
+  const [corrDate, setCorrDate] = useState("");
+  const [corrTime, setCorrTime] = useState("");
+  const [corrReason, setCorrReason] = useState("");
+  const [submittingCorr, setSubmittingCorr] = useState(false);
+
   const loadEmployee = useCallback(() => {
     const emp = getEmployee(session.id);
     if (!emp) return;
@@ -93,8 +119,14 @@ export default function EmployeeDashboard({
       statuses[cid] = getLastAttendanceStatus(session.id, cid);
     }
     setCheckinStatus(statuses);
-    // Load all attendance for duration calculation
     setAllEmpAttendance(getEmployeeAttendance(session.id));
+    // Load correction requests for all companies
+    const allCorr: CorrectionRequest[] = [];
+    for (const cid of emp.companyIds) {
+      allCorr.push(...getEmployeeCorrectionRequests(session.id, cid));
+    }
+    allCorr.sort((a, b) => b.createdAt - a.createdAt);
+    setCorrectionRequests(allCorr);
   }, [session.id]);
 
   const loadAttendance = useCallback(() => {
@@ -169,6 +201,64 @@ export default function EmployeeDashboard({
     setScanForCompany("");
   }
 
+  function openEditProfile() {
+    if (employee) {
+      setEditName(employee.fullName);
+      setEditPhone(employee.phone || "");
+    }
+    setShowEditProfile(true);
+  }
+
+  function handleSaveProfile() {
+    if (!editName.trim()) {
+      toast.error(t("nameRequired"));
+      return;
+    }
+    setSavingProfile(true);
+    const res = updateEmployee(session.id, editName, editPhone || undefined);
+    setSavingProfile(false);
+    if (!res.ok) {
+      toast.error(res.message);
+      return;
+    }
+    toast.success(t("profileUpdated") || t("success"));
+    setShowEditProfile(false);
+    loadEmployee();
+  }
+
+  function handleSubmitCorrection() {
+    if (!corrCompanyId || !corrDate || !corrTime || !corrReason.trim()) {
+      toast.error(t("error"));
+      return;
+    }
+    setSubmittingCorr(true);
+    const res = addCorrectionRequest(
+      corrCompanyId,
+      session.id,
+      corrRequestType,
+      corrDate,
+      corrTime,
+      corrReason,
+    );
+    setSubmittingCorr(false);
+    if (!res.ok) {
+      toast.error(res.message);
+      return;
+    }
+    toast.success(t("correctionSubmitted"));
+    setShowAddCorrection(false);
+    setCorrCompanyId("");
+    setCorrRequestType("checkin");
+    setCorrDate("");
+    setCorrTime("");
+    setCorrReason("");
+    loadEmployee();
+  }
+
+  const pendingCount = correctionRequests.filter(
+    (r) => r.status === "pending",
+  ).length;
+
   const tabs: { key: Tab; label: string; icon: React.ReactNode }[] = [
     { key: "companies", label: t("myCompanies"), icon: <User size={16} /> },
     {
@@ -177,6 +267,11 @@ export default function EmployeeDashboard({
       icon: <Clock size={16} />,
     },
     { key: "qr", label: t("myQRCode"), icon: <QrCode size={16} /> },
+    {
+      key: "corrections",
+      label: t("correctionRequests"),
+      icon: <ClipboardList size={16} />,
+    },
   ];
 
   return (
@@ -187,7 +282,17 @@ export default function EmployeeDashboard({
             <User size={16} className="text-white" />
           </div>
           <div>
-            <div className="font-semibold text-sm">{session.name}</div>
+            <div className="flex items-center gap-2">
+              <div className="font-semibold text-sm">{session.name}</div>
+              <button
+                type="button"
+                onClick={openEditProfile}
+                className="p-1 hover:bg-muted rounded-md transition-colors text-muted-foreground hover:text-foreground"
+                title={t("editProfile")}
+              >
+                <Pencil size={12} />
+              </button>
+            </div>
             <div className="text-xs text-muted-foreground">
               {t("employeeLogin")}
             </div>
@@ -228,6 +333,7 @@ export default function EmployeeDashboard({
           <button
             key={tb.key}
             type="button"
+            data-ocid={`${tb.key}.tab`}
             onClick={() => setTab(tb.key)}
             className={`flex items-center gap-2 px-4 py-3 text-sm font-medium whitespace-nowrap transition-colors ${
               tab === tb.key
@@ -237,6 +343,11 @@ export default function EmployeeDashboard({
           >
             {tb.icon}
             {tb.label}
+            {tb.key === "corrections" && pendingCount > 0 && (
+              <span className="ml-1 bg-orange-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">
+                {pendingCount}
+              </span>
+            )}
           </button>
         ))}
       </nav>
@@ -248,6 +359,7 @@ export default function EmployeeDashboard({
               <h2 className="text-xl font-bold">{t("myCompanies")}</h2>
               <button
                 type="button"
+                data-ocid="companies.open_modal_button"
                 onClick={() => setShowJoin(true)}
                 className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium px-4 py-2 rounded-xl transition-colors"
               >
@@ -311,6 +423,7 @@ export default function EmployeeDashboard({
                       <div className="flex gap-3">
                         <button
                           type="button"
+                          data-ocid={"companies.primary_button"}
                           onClick={() => handleToggle(company.id)}
                           disabled={toggling === company.id}
                           className={`flex-1 py-4 rounded-xl font-bold text-lg transition-all ${
@@ -429,11 +542,7 @@ export default function EmployeeDashboard({
                               }`}
                             >
                               <span
-                                className={`w-1.5 h-1.5 rounded-full ${
-                                  rec.recordType === "checkin"
-                                    ? "bg-green-400"
-                                    : "bg-gray-400"
-                                }`}
+                                className={`w-1.5 h-1.5 rounded-full ${rec.recordType === "checkin" ? "bg-green-400" : "bg-gray-400"}`}
                               />
                               {rec.recordType === "checkin"
                                 ? t("checkinType")
@@ -479,6 +588,94 @@ export default function EmployeeDashboard({
                 </p>
               </div>
             </div>
+          </div>
+        )}
+
+        {tab === "corrections" && (
+          <div>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold">{t("correctionRequests")}</h2>
+              {companies.length > 0 && (
+                <button
+                  type="button"
+                  data-ocid="corrections.open_modal_button"
+                  onClick={() => setShowAddCorrection(true)}
+                  className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium px-4 py-2 rounded-xl transition-colors"
+                >
+                  <Plus size={16} />
+                  {t("addCorrectionRequest")}
+                </button>
+              )}
+            </div>
+            {correctionRequests.length === 0 ? (
+              <div className="text-center py-16 text-muted-foreground">
+                <div className="text-4xl mb-3">📋</div>
+                <div>{t("noCorrectionRequests")}</div>
+                {companies.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAddCorrection(true)}
+                    className="mt-4 bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-3 rounded-xl transition-colors"
+                  >
+                    {t("addCorrectionRequest")}
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {correctionRequests.map((req) => {
+                  const comp = getCompany(req.companyId);
+                  return (
+                    <div
+                      key={req.id}
+                      className="bg-card border border-border rounded-xl p-4"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-medium text-sm">
+                              {comp?.name || req.companyId}
+                            </span>
+                            <span
+                              className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                                req.status === "pending"
+                                  ? "bg-orange-500/20 text-orange-400"
+                                  : req.status === "approved"
+                                    ? "bg-green-500/20 text-green-400"
+                                    : "bg-red-500/20 text-red-400"
+                              }`}
+                            >
+                              {t(req.status)}
+                            </span>
+                            <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
+                              {req.requestType === "checkin"
+                                ? t("checkinType")
+                                : t("checkoutType")}
+                            </span>
+                          </div>
+                          <div className="text-sm text-muted-foreground">
+                            <span className="font-mono">
+                              {req.requestedDate} {req.requestedTime}
+                            </span>
+                            {req.reason && (
+                              <span className="ml-3 italic">{req.reason}</span>
+                            )}
+                          </div>
+                          {req.rejectionNote && (
+                            <div className="text-xs text-red-400 mt-1">
+                              {t("rejectionNote")}: {req.rejectionNote}
+                            </div>
+                          )}
+                          <div className="text-xs text-muted-foreground/60 mt-1">
+                            {formatDate(req.createdAt)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
       </main>
@@ -528,6 +725,183 @@ export default function EmployeeDashboard({
                   className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white py-3 rounded-xl text-sm font-semibold transition-colors"
                 >
                   {joining ? t("loading") : t("join")}
+                </button>
+              </div>
+            </div>
+          </div>
+        </dialog>
+      )}
+
+      {showEditProfile && (
+        <dialog
+          open
+          className="fixed inset-0 bg-black/60 flex items-center justify-center p-6 z-50 m-0 max-w-none w-full h-full border-0"
+        >
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: modal backdrop */}
+          <div
+            className="fixed inset-0"
+            onClick={() => setShowEditProfile(false)}
+          />
+          <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-md shadow-2xl relative z-10">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-bold">{t("editProfile")}</h3>
+              <button
+                type="button"
+                onClick={() => setShowEditProfile(false)}
+                className="p-1 hover:bg-muted rounded-lg"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <div className="text-sm font-medium mb-2">{t("fullName")}</div>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+              <div>
+                <div className="text-sm font-medium mb-2">{t("phone")}</div>
+                <input
+                  type="text"
+                  value={editPhone}
+                  onChange={(e) => setEditPhone(e.target.value)}
+                  className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEditProfile(false)}
+                  className="flex-1 border border-border py-3 rounded-xl text-sm font-medium hover:bg-muted transition-colors"
+                >
+                  {t("cancel")}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveProfile}
+                  disabled={savingProfile}
+                  className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white py-3 rounded-xl text-sm font-semibold transition-colors"
+                >
+                  {savingProfile ? t("loading") : t("save")}
+                </button>
+              </div>
+            </div>
+          </div>
+        </dialog>
+      )}
+
+      {showAddCorrection && (
+        <dialog
+          open
+          className="fixed inset-0 bg-black/60 flex items-center justify-center p-6 z-50 m-0 max-w-none w-full h-full border-0"
+        >
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: modal backdrop */}
+          <div
+            className="fixed inset-0"
+            onClick={() => setShowAddCorrection(false)}
+          />
+          <div
+            data-ocid="corrections.dialog"
+            className="bg-card border border-border rounded-2xl p-6 w-full max-w-md shadow-2xl relative z-10"
+          >
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-bold">{t("addCorrectionRequest")}</h3>
+              <button
+                type="button"
+                onClick={() => setShowAddCorrection(false)}
+                className="p-1 hover:bg-muted rounded-lg"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <div className="text-sm font-medium mb-2">
+                  {t("selectCompany")}
+                </div>
+                <select
+                  value={corrCompanyId}
+                  onChange={(e) => setCorrCompanyId(e.target.value)}
+                  data-ocid="corrections.select"
+                  className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                >
+                  <option value="">{t("selectCompany")}</option>
+                  {companies.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <div className="text-sm font-medium mb-2">
+                  {t("requestType")}
+                </div>
+                <select
+                  value={corrRequestType}
+                  onChange={(e) =>
+                    setCorrRequestType(e.target.value as "checkin" | "checkout")
+                  }
+                  className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                >
+                  <option value="checkin">{t("checkinType")}</option>
+                  <option value="checkout">{t("checkoutType")}</option>
+                </select>
+              </div>
+              <div>
+                <div className="text-sm font-medium mb-2">
+                  {t("requestedDate")}
+                </div>
+                <input
+                  type="date"
+                  value={corrDate}
+                  onChange={(e) => setCorrDate(e.target.value)}
+                  data-ocid="corrections.input"
+                  className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+              <div>
+                <div className="text-sm font-medium mb-2">
+                  {t("requestedTime")}
+                </div>
+                <input
+                  type="time"
+                  value={corrTime}
+                  onChange={(e) => setCorrTime(e.target.value)}
+                  className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+              <div>
+                <div className="text-sm font-medium mb-2">{t("reason")}</div>
+                <textarea
+                  value={corrReason}
+                  onChange={(e) => setCorrReason(e.target.value)}
+                  data-ocid="corrections.textarea"
+                  rows={3}
+                  className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-none"
+                  placeholder={t("reason")}
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddCorrection(false)}
+                  className="flex-1 border border-border py-3 rounded-xl text-sm font-medium hover:bg-muted transition-colors"
+                >
+                  {t("cancel")}
+                </button>
+                <button
+                  type="button"
+                  data-ocid="corrections.submit_button"
+                  onClick={handleSubmitCorrection}
+                  disabled={submittingCorr}
+                  className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white py-3 rounded-xl text-sm font-semibold transition-colors"
+                >
+                  {submittingCorr ? t("loading") : t("create")}
                 </button>
               </div>
             </div>
