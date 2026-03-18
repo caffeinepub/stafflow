@@ -85,6 +85,8 @@ export interface CorrectionRequest {
   status: "pending" | "approved" | "rejected";
   rejectionNote?: string;
   createdAt: number;
+  documentBase64?: string;
+  documentName?: string;
 }
 
 const KEYS = {
@@ -603,6 +605,8 @@ export function addCorrectionRequest(
   requestedDate: string,
   requestedTime: string,
   reason: string,
+  documentBase64?: string,
+  documentName?: string,
 ): { ok: boolean; message: string } {
   const employee = getEmployee(employeeId);
   if (!employee) return { ok: false, message: "Employee not found" };
@@ -618,6 +622,8 @@ export function addCorrectionRequest(
     reason: reason.trim(),
     status: "pending",
     createdAt: Date.now(),
+    documentBase64: documentBase64 || undefined,
+    documentName: documentName || undefined,
   };
   const requests = load<CorrectionRequest>(KEYS.correctionRequests);
   requests.push(req);
@@ -1190,6 +1196,8 @@ export interface LeaveRequest {
   status: "pending" | "approved" | "rejected";
   rejectionNote?: string;
   createdAt: number;
+  documentBase64?: string;
+  documentName?: string;
 }
 
 export function addLeaveRequest(
@@ -1198,6 +1206,8 @@ export function addLeaveRequest(
   date: string,
   leaveType: LeaveRequest["leaveType"],
   reason: string,
+  documentBase64?: string,
+  documentName?: string,
 ): { ok: boolean; message: string } {
   if (!date || !reason.trim())
     return { ok: false, message: "Date and reason required" };
@@ -1214,6 +1224,8 @@ export function addLeaveRequest(
     reason: reason.trim(),
     status: "pending",
     createdAt: Date.now(),
+    documentBase64: documentBase64 || undefined,
+    documentName: documentName || undefined,
   };
   const requests = load<LeaveRequest>(LEAVE_REQ_KEY);
   requests.push(req);
@@ -1501,4 +1513,129 @@ export function getCompanyAnnouncements(companyId: string): Announcement[] {
       if (!a.pinned && b.pinned) return 1;
       return b.createdAt - a.createdAt;
     });
+}
+
+// ===== WORK SCHEDULE =====
+
+export interface WorkSchedule {
+  id: string;
+  companyId: string;
+  year: number;
+  month: number;
+  day: number;
+  employeeId: string;
+  shiftId: string; // shiftId or 'off' or 'unassigned'
+}
+
+export function setScheduleEntry(
+  companyId: string,
+  year: number,
+  month: number,
+  day: number,
+  employeeId: string,
+  shiftId: string,
+): void {
+  const key = `sf_schedule_${companyId}`;
+  const schedules = load<WorkSchedule>(key);
+  const idx = schedules.findIndex(
+    (s) =>
+      s.year === year &&
+      s.month === month &&
+      s.day === day &&
+      s.employeeId === employeeId,
+  );
+  if (idx !== -1) {
+    schedules[idx].shiftId = shiftId;
+  } else {
+    schedules.push({
+      id: nextId(),
+      companyId,
+      year,
+      month,
+      day,
+      employeeId,
+      shiftId,
+    });
+  }
+  save(key, schedules);
+}
+
+export function getSchedule(
+  companyId: string,
+  year: number,
+  month: number,
+): WorkSchedule[] {
+  const key = `sf_schedule_${companyId}`;
+  return load<WorkSchedule>(key).filter(
+    (s) => s.year === year && s.month === month,
+  );
+}
+
+// ===== OVERTIME LOG =====
+
+export interface OvertimeLog {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  employeeName: string;
+  recordId: string;
+  date: string;
+  overtimeMinutes: number;
+  status: "pending" | "approved" | "rejected";
+  reviewedAt?: number;
+  reviewedBy?: string;
+}
+
+export function addOvertimeLog(entry: Omit<OvertimeLog, "id">): void {
+  const key = `sf_overtimelog_${entry.companyId}`;
+  const logs = load<OvertimeLog>(key);
+  const exists = logs.find((l) => l.recordId === entry.recordId);
+  if (exists) return;
+  logs.push({ ...entry, id: nextId() });
+  save(key, logs);
+}
+
+export function getCompanyOvertimeLogs(companyId: string): OvertimeLog[] {
+  const key = `sf_overtimelog_${companyId}`;
+  return load<OvertimeLog>(key).sort((a, b) => b.date.localeCompare(a.date));
+}
+
+export function updateOvertimeLogStatus(
+  id: string,
+  companyId: string,
+  status: "approved" | "rejected",
+  reviewedBy: string,
+): { ok: boolean; message: string } {
+  const key = `sf_overtimelog_${companyId}`;
+  const logs = load<OvertimeLog>(key);
+  const idx = logs.findIndex((l) => l.id === id);
+  if (idx === -1) return { ok: false, message: "Not found" };
+  logs[idx].status = status;
+  logs[idx].reviewedAt = Date.now();
+  logs[idx].reviewedBy = reviewedBy;
+  save(key, logs);
+  return { ok: true, message: status === "approved" ? "Approved" : "Rejected" };
+}
+
+export function ensureOvertimeLogsForCompany(companyId: string): void {
+  const company = load<Company>(KEYS.companies).find((c) => c.id === companyId);
+  if (!company?.workHours) return;
+  const allRecords = load<AttendanceRecord>(KEYS.attendance).filter(
+    (r) => r.companyId === companyId && r.recordType === "checkout",
+  );
+  for (const rec of allRecords) {
+    const ot = getOvertimeMinutes(0, rec.timestamp, company.workHours.end);
+    if (ot > 0) {
+      const dateStr = new Date(rec.timestamp).toISOString().split("T")[0];
+      addOvertimeLog({
+        companyId,
+        employeeId: rec.employeeId,
+        employeeName: rec.employeeName,
+        recordId: rec.id,
+        date: dateStr,
+        overtimeMinutes: ot,
+        status: "pending",
+      });
+    }
+  }
 }

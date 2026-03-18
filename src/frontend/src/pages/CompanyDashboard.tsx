@@ -3,17 +3,23 @@ import {
   BarChart3,
   Building2,
   Calendar,
+  CalendarDays,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ChevronUp,
   ClipboardList,
+  Clock,
   Copy,
   Database,
   Download,
   EyeOff,
+  FileText,
   LogOut,
   Megaphone,
   Moon,
+  Paperclip,
   Pencil,
   Pin,
   Plus,
@@ -30,7 +36,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -57,8 +63,10 @@ import {
   type LeaveRequest,
   type MissingCheckout,
   type MonthlySummaryRow,
+  type OvertimeLog,
   type PublicHoliday,
   type Shift,
+  type WorkSchedule,
   addAnnouncement,
   addAuditEntry,
   addAutoCheckoutRecord,
@@ -74,6 +82,7 @@ import {
   deleteAnnouncement,
   deleteLeaveRecord,
   deletePublicHoliday,
+  ensureOvertimeLogsForCompany,
   exportAllData,
   formatDuration,
   getAllCompanyAttendance,
@@ -90,6 +99,7 @@ import {
   getCompanyLeaveBalances,
   getCompanyLeaveRecords,
   getCompanyLeaveRequests,
+  getCompanyOvertimeLogs,
   getDailyCheckinCount,
   getInviteCodeStatus,
   getLeaveBalance,
@@ -98,12 +108,14 @@ import {
   getOvertimeMinutes,
   getRecordDuration,
   getRecordDurationMinutes,
+  getSchedule,
   importAllData,
   isEarlyCheckout,
   isLateCheckin,
   rejectCorrectionRequest,
   rejectLeaveRequest,
   setLeaveBalance,
+  setScheduleEntry,
   toggleEmployeeActive,
   updateCompanyAutoCheckout,
   updateCompanyMinHours,
@@ -113,9 +125,12 @@ import {
   updateEmployeeDepartment,
   updateEmployeePersonalMinHours,
   updateEmployeePersonalWorkHours,
+  updateOvertimeLogStatus,
 } from "../store";
 
 import KioskMode from "../components/KioskMode";
+import OvertimeApprovalsTab from "../components/OvertimeApprovalsTab";
+import ScheduleTab from "../components/ScheduleTab";
 
 interface Props {
   lang: Lang;
@@ -142,6 +157,8 @@ type Tab =
   | "alerts"
   | "auditlog"
   | "announcements"
+  | "schedule"
+  | "overtimeapprovals"
   | "settings";
 
 function formatDate(ts: number) {
@@ -162,7 +179,17 @@ export default function CompanyDashboard({
   session,
   onLogout,
 }: Props) {
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTabRaw] = useState<Tab>("overview");
+  function setTab(t: Tab) {
+    setTabRaw(t);
+    if (t === "schedule") {
+      setScheduleData(getSchedule(session.id, scheduleYear, scheduleMonth));
+    }
+    if (t === "overtimeapprovals") {
+      ensureOvertimeLogsForCompany(session.id);
+      setOvertimeLogs(getCompanyOvertimeLogs(session.id));
+    }
+  }
   const [inviteCodes, setInviteCodes] = useState<InviteCode[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
@@ -308,6 +335,25 @@ export default function CompanyDashboard({
   const [editBalanceEmpId, setEditBalanceEmpId] = useState("");
   const [editBalanceValue, setEditBalanceValue] = useState("");
 
+  // Work schedule state
+  const [scheduleYear, setScheduleYear] = React.useState(
+    new Date().getFullYear(),
+  );
+  const [scheduleMonth, setScheduleMonth] = React.useState(
+    new Date().getMonth(),
+  );
+  const [scheduleData, setScheduleData] = React.useState<WorkSchedule[]>([]);
+  const [scheduleAssignEmpId, setScheduleAssignEmpId] = React.useState("");
+  const [scheduleAssignShiftId, setScheduleAssignShiftId] = React.useState("");
+  const [scheduleAssignDay, setScheduleAssignDay] = React.useState(0);
+  const [showScheduleModal, setShowScheduleModal] = React.useState(false);
+
+  // Overtime approvals state
+  const [overtimeLogs, setOvertimeLogs] = React.useState<OvertimeLog[]>([]);
+  const [overtimeFilter, setOvertimeFilter] = React.useState<"pending" | "all">(
+    "pending",
+  );
+
   const loadData = useCallback(() => {
     setInviteCodes(getCompanyInviteCodes(session.id));
     setEmployees(getCompanyEmployees(session.id));
@@ -327,6 +373,7 @@ export default function CompanyDashboard({
     setMissingCheckouts(getMissingCheckouts(session.id));
     setAnnouncements(getCompanyAnnouncements(session.id));
     setLeaveBalances(getCompanyLeaveBalances(session.id));
+    setOvertimeLogs(getCompanyOvertimeLogs(session.id));
   }, [session.id]);
 
   const loadAttendance = useCallback(() => {
@@ -944,6 +991,16 @@ export default function CompanyDashboard({
       label: t("announcements"),
       icon: <Megaphone size={16} />,
     },
+    {
+      key: "schedule",
+      label: t("scheduleTab"),
+      icon: <CalendarDays size={16} />,
+    },
+    {
+      key: "overtimeapprovals",
+      label: t("overtimeApprovals"),
+      icon: <Clock size={16} />,
+    },
     { key: "settings", label: t("settings"), icon: <Settings size={16} /> },
   ];
 
@@ -1021,6 +1078,12 @@ export default function CompanyDashboard({
                 0 && (
                 <span className="ml-1 bg-blue-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">
                   {leaveRequests.filter((r) => r.status === "pending").length}
+                </span>
+              )}
+            {tb.key === "overtimeapprovals" &&
+              overtimeLogs.filter((l) => l.status === "pending").length > 0 && (
+                <span className="ml-1 bg-orange-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">
+                  {overtimeLogs.filter((l) => l.status === "pending").length}
                 </span>
               )}
           </button>
@@ -2416,6 +2479,18 @@ export default function CompanyDashboard({
                           <div className="text-xs text-muted-foreground/60 mt-1">
                             {formatDate(req.createdAt)}
                           </div>
+                          {req.documentBase64 && (
+                            <div className="mt-1">
+                              <a
+                                href={req.documentBase64}
+                                download={req.documentName || "document"}
+                                className="inline-flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300"
+                              >
+                                <Paperclip size={12} />
+                                {req.documentName || t("viewDocument")}
+                              </a>
+                            </div>
+                          )}
                           {req.rejectionNote && (
                             <div className="text-xs text-red-400 mt-1">
                               {t("rejectionNote")}: {req.rejectionNote}
@@ -2563,6 +2638,18 @@ export default function CompanyDashboard({
                           {req.reason && (
                             <div className="text-xs text-muted-foreground mt-1 italic">
                               {req.reason}
+                            </div>
+                          )}
+                          {req.documentBase64 && (
+                            <div className="mt-1">
+                              <a
+                                href={req.documentBase64}
+                                download={req.documentName || "document"}
+                                className="inline-flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300"
+                              >
+                                <Paperclip size={12} />
+                                {req.documentName || t("viewDocument")}
+                              </a>
                             </div>
                           )}
                           {req.rejectionNote && (
@@ -2912,6 +2999,71 @@ export default function CompanyDashboard({
               </div>
             )}
           </div>
+        )}
+
+        {tab === "schedule" && (
+          <ScheduleTab
+            company={company}
+            employees={employees.filter(
+              (e) => e.activeInCompanies?.[session.id] !== false,
+            )}
+            year={scheduleYear}
+            month={scheduleMonth}
+            scheduleData={scheduleData}
+            onYearChange={(y) => {
+              setScheduleYear(y);
+              setScheduleData(getSchedule(session.id, y, scheduleMonth));
+            }}
+            onMonthChange={(m) => {
+              setScheduleMonth(m);
+              setScheduleData(getSchedule(session.id, scheduleYear, m));
+            }}
+            showModal={showScheduleModal}
+            assignEmpId={scheduleAssignEmpId}
+            assignShiftId={scheduleAssignShiftId}
+            assignDay={scheduleAssignDay}
+            onOpenModal={(day: number, empId: string) => {
+              setScheduleAssignDay(day);
+              setScheduleAssignEmpId(empId);
+              setScheduleAssignShiftId("");
+              setShowScheduleModal(true);
+            }}
+            onCloseModal={() => setShowScheduleModal(false)}
+            onAssignEmpChange={setScheduleAssignEmpId}
+            onAssignShiftChange={setScheduleAssignShiftId}
+            onSaveEntry={() => {
+              setScheduleEntry(
+                session.id,
+                scheduleYear,
+                scheduleMonth,
+                scheduleAssignDay,
+                scheduleAssignEmpId,
+                scheduleAssignShiftId || "unassigned",
+              );
+              setScheduleData(
+                getSchedule(session.id, scheduleYear, scheduleMonth),
+              );
+              setShowScheduleModal(false);
+            }}
+            t={t}
+          />
+        )}
+
+        {tab === "overtimeapprovals" && (
+          <OvertimeApprovalsTab
+            overtimeLogs={overtimeLogs}
+            filter={overtimeFilter}
+            onFilterChange={setOvertimeFilter}
+            onApprove={(id) => {
+              updateOvertimeLogStatus(id, session.id, "approved", session.name);
+              setOvertimeLogs(getCompanyOvertimeLogs(session.id));
+            }}
+            onReject={(id) => {
+              updateOvertimeLogStatus(id, session.id, "rejected", session.name);
+              setOvertimeLogs(getCompanyOvertimeLogs(session.id));
+            }}
+            t={t}
+          />
         )}
 
         {tab === "settings" && (

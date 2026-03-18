@@ -1,10 +1,14 @@
 import {
   BarChart3,
+  CalendarDays,
   Camera,
+  ChevronLeft,
+  ChevronRight,
   ClipboardList,
   Clock,
   LogOut,
   Moon,
+  Paperclip,
   Pencil,
   Pin,
   Plus,
@@ -25,6 +29,7 @@ import {
   type CorrectionRequest,
   type Employee,
   type LeaveRequest,
+  type WorkSchedule,
   addCorrectionRequest,
   addLeaveRequest,
   endBreak,
@@ -39,6 +44,7 @@ import {
   getLeaveBalance,
   getMonthlyAttendanceSummary,
   getRecordDuration,
+  getSchedule,
   joinCompany,
   startBreak,
   toggleAttendance,
@@ -62,7 +68,8 @@ type Tab =
   | "history"
   | "qr"
   | "corrections"
-  | "leaverequests";
+  | "leaverequests"
+  | "schedule";
 
 function formatDate(ts: number) {
   return new Date(ts).toLocaleString();
@@ -135,6 +142,17 @@ export default function EmployeeDashboard({
   const [leaveReqReason, setLeaveReqReason] = useState("");
   const [submittingLeaveReq, setSubmittingLeaveReq] = useState(false);
 
+  // Document attachment state
+  const [leaveDocBase64, setLeaveDocBase64] = useState("");
+  const [leaveDocName, setLeaveDocName] = useState("");
+  const [corrDocBase64, setCorrDocBase64] = useState("");
+  const [corrDocName, setCorrDocName] = useState("");
+
+  // Schedule view state
+  const [scheduleYear, setScheduleYear] = useState(new Date().getFullYear());
+  const [scheduleMonth, setScheduleMonth] = useState(new Date().getMonth());
+  const [scheduleData, setScheduleData] = useState<WorkSchedule[]>([]);
+
   const loadEmployee = useCallback(() => {
     const emp = getEmployee(session.id);
     if (!emp) return;
@@ -190,6 +208,20 @@ export default function EmployeeDashboard({
   useEffect(() => {
     loadEmployee();
   }, [loadEmployee]);
+
+  useEffect(() => {
+    if (tab === "schedule") {
+      const newData: WorkSchedule[] = [];
+      for (const c of companies) {
+        newData.push(
+          ...getSchedule(c.id, scheduleYear, scheduleMonth).filter(
+            (s) => s.employeeId === session.id,
+          ),
+        );
+      }
+      setScheduleData(newData);
+    }
+  }, [tab, companies, scheduleYear, scheduleMonth, session.id]);
   useEffect(() => {
     loadAttendance();
   }, [loadAttendance]);
@@ -287,6 +319,8 @@ export default function EmployeeDashboard({
       corrDate,
       corrTime,
       corrReason,
+      corrDocBase64 || undefined,
+      corrDocName || undefined,
     );
     setSubmittingCorr(false);
     if (!res.ok) {
@@ -300,6 +334,8 @@ export default function EmployeeDashboard({
     setCorrDate("");
     setCorrTime("");
     setCorrReason("");
+    setCorrDocBase64("");
+    setCorrDocName("");
     loadEmployee();
   }
 
@@ -329,6 +365,11 @@ export default function EmployeeDashboard({
       key: "leaverequests",
       label: t("leaveRequests"),
       icon: <ClipboardList size={16} />,
+    },
+    {
+      key: "schedule",
+      label: t("scheduleTab"),
+      icon: <CalendarDays size={16} />,
     },
   ];
 
@@ -989,6 +1030,45 @@ export default function EmployeeDashboard({
         )}
       </main>
 
+      {tab === "schedule" && (
+        <EmployeeScheduleTab
+          employeeId={session.id}
+          companies={companies.map((c) => ({
+            id: c.id,
+            name: c.name,
+            shifts: c.shifts,
+          }))}
+          year={scheduleYear}
+          month={scheduleMonth}
+          scheduleData={scheduleData}
+          onYearChange={(y) => {
+            setScheduleYear(y);
+            const newData: WorkSchedule[] = [];
+            for (const c of companies) {
+              newData.push(
+                ...getSchedule(c.id, y, scheduleMonth).filter(
+                  (s) => s.employeeId === session.id,
+                ),
+              );
+            }
+            setScheduleData(newData);
+          }}
+          onMonthChange={(m) => {
+            setScheduleMonth(m);
+            const newData: WorkSchedule[] = [];
+            for (const c of companies) {
+              newData.push(
+                ...getSchedule(c.id, scheduleYear, m).filter(
+                  (s) => s.employeeId === session.id,
+                ),
+              );
+            }
+            setScheduleData(newData);
+          }}
+          t={t}
+        />
+      )}
+
       {showAddLeaveReq && (
         <dialog
           open
@@ -1072,6 +1152,50 @@ export default function EmployeeDashboard({
                   className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-none"
                 />
               </div>
+              <div>
+                <div className="text-sm font-medium mb-2">
+                  {t("attachDocument")}
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer bg-background border border-border rounded-xl px-4 py-2 text-sm hover:bg-muted transition-colors">
+                  <Paperclip size={16} className="text-muted-foreground" />
+                  {leaveDocName ? (
+                    <span className="text-green-400 text-xs truncate max-w-[200px]">
+                      {leaveDocName}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">
+                      {t("attachDocument")}
+                    </span>
+                  )}
+                  <input
+                    type="file"
+                    className="hidden"
+                    accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = (ev) => {
+                        setLeaveDocBase64(ev.target?.result as string);
+                        setLeaveDocName(file.name);
+                      };
+                      reader.readAsDataURL(file);
+                    }}
+                  />
+                </label>
+                {leaveDocName && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLeaveDocBase64("");
+                      setLeaveDocName("");
+                    }}
+                    className="text-xs text-red-400 mt-1"
+                  >
+                    {t("clear")}
+                  </button>
+                )}
+              </div>
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"
@@ -1101,6 +1225,8 @@ export default function EmployeeDashboard({
                       leaveReqDate,
                       leaveReqType,
                       leaveReqReason,
+                      leaveDocBase64 || undefined,
+                      leaveDocName || undefined,
                     );
                     setSubmittingLeaveReq(false);
                     if (!res.ok) {
@@ -1112,6 +1238,8 @@ export default function EmployeeDashboard({
                     setLeaveReqCompanyId("");
                     setLeaveReqDate("");
                     setLeaveReqReason("");
+                    setLeaveDocBase64("");
+                    setLeaveDocName("");
                     loadEmployee();
                   }}
                   className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white py-3 rounded-xl text-sm font-semibold transition-colors"
@@ -1330,6 +1458,50 @@ export default function EmployeeDashboard({
                   placeholder={t("reason")}
                 />
               </div>
+              <div>
+                <div className="text-sm font-medium mb-2">
+                  {t("attachDocument")}
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer bg-background border border-border rounded-xl px-4 py-2 text-sm hover:bg-muted transition-colors">
+                  <Paperclip size={16} className="text-muted-foreground" />
+                  {corrDocName ? (
+                    <span className="text-green-400 text-xs truncate max-w-[200px]">
+                      {corrDocName}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">
+                      {t("attachDocument")}
+                    </span>
+                  )}
+                  <input
+                    type="file"
+                    className="hidden"
+                    accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = (ev) => {
+                        setCorrDocBase64(ev.target?.result as string);
+                        setCorrDocName(file.name);
+                      };
+                      reader.readAsDataURL(file);
+                    }}
+                  />
+                </label>
+                {corrDocName && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCorrDocBase64("");
+                      setCorrDocName("");
+                    }}
+                    className="text-xs text-red-400 mt-1"
+                  >
+                    {t("clear")}
+                  </button>
+                )}
+              </div>
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"
@@ -1378,6 +1550,129 @@ export default function EmployeeDashboard({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function EmployeeScheduleTab({
+  employeeId,
+  companies,
+  year,
+  month,
+  scheduleData,
+  onYearChange,
+  onMonthChange,
+  t,
+}: {
+  employeeId: string;
+  companies: {
+    id: string;
+    name: string;
+    shifts?: import("../store").Shift[];
+  }[];
+  year: number;
+  month: number;
+  scheduleData: WorkSchedule[];
+  onYearChange: (y: number) => void;
+  onMonthChange: (m: number) => void;
+  t: (k: string) => string;
+}) {
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const firstDayOfWeek = new Date(year, month, 1).getDay();
+  const monthName = new Date(year, month, 1).toLocaleString("default", {
+    month: "long",
+  });
+
+  const getEntry = (day: number) =>
+    scheduleData.find((s) => s.day === day && s.employeeId === employeeId);
+
+  const getShiftName = (shiftId: string, companyId: string) => {
+    if (shiftId === "off") return t("dayOff");
+    if (shiftId === "unassigned") return "-";
+    const comp = companies.find((c) => c.id === companyId);
+    const shift = comp?.shifts?.find((s) => s.id === shiftId);
+    return shift
+      ? `${shift.name} (${shift.startTime}-${shift.endTime})`
+      : shiftId;
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-xl font-bold">{t("workSchedule")}</h2>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              const d = new Date(year, month - 1);
+              onYearChange(d.getFullYear());
+              onMonthChange(d.getMonth());
+            }}
+            className="p-2 rounded-lg hover:bg-muted transition-colors"
+          >
+            <ChevronLeft size={16} />
+          </button>
+          <span className="text-sm font-medium w-32 text-center">
+            {monthName} {year}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              const d = new Date(year, month + 1);
+              onYearChange(d.getFullYear());
+              onMonthChange(d.getMonth());
+            }}
+            className="p-2 rounded-lg hover:bg-muted transition-colors"
+          >
+            <ChevronRight size={16} />
+          </button>
+        </div>
+      </div>
+      <div className="grid grid-cols-7 gap-1 mb-2">
+        {["Pz", "Pt", "Sa", "Ça", "Pe", "Cu", "Ct"].map((d) => (
+          <div
+            key={d}
+            className="text-center text-xs text-muted-foreground py-1 font-medium"
+          >
+            {d}
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {Array.from({ length: firstDayOfWeek }, (_, i) => (
+          <div key={`empty-start-${i + 1}`} />
+        ))}
+        {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((day) => {
+          const entry = getEntry(day);
+          const isToday =
+            new Date().getDate() === day &&
+            new Date().getMonth() === month &&
+            new Date().getFullYear() === year;
+          return (
+            <div
+              key={day}
+              className={`rounded-lg p-2 min-h-[60px] border text-xs ${
+                isToday
+                  ? "border-blue-500 bg-blue-500/10"
+                  : entry
+                    ? "border-green-500/30 bg-green-500/5"
+                    : "border-border bg-card"
+              }`}
+            >
+              <div
+                className={`font-semibold mb-1 ${isToday ? "text-blue-400" : "text-foreground"}`}
+              >
+                {day}
+              </div>
+              {entry && (
+                <div className="text-muted-foreground text-[10px] leading-tight">
+                  {getShiftName(entry.shiftId, entry.companyId)}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

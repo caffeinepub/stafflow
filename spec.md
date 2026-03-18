@@ -1,46 +1,32 @@
 # StafFlow
 
 ## Current State
-StafFlow is a localStorage-based personnel tracking app (v9) with: authentication (company/employee codes), attendance check-in/out, break tracking, leave records, leave requests, correction requests, monthly summaries, overtime, departments, shifts, public holidays, backup/restore, audit log, auto-checkout, kiosk mode, visual statistics, payroll reports, threshold alerts, and bulk operations. 10-language support.
+Sürüm 10 aktif. Vardiya tanımlama ve atama mevcut ama takvim bazlı program planlama yok. Fazla mesai otomatik hesaplanıyor ama onay akışı yok. İzin/düzeltme taleplerinde belge eki desteği yok.
+
+Mevcut sekmeler: overview, live, invites, employees, attendance, summary, statistics, corrections, leaverequests, payroll, alerts, auditlog, announcements, settings.
+
+Veriler localStorage'da, store.ts ile yönetiliyor.
 
 ## Requested Changes (Diff)
 
 ### Add
-1. **İzin bakiyesi takibi (Leave Balance Tracking)**
-   - New `LeaveBalance` interface: `{ id, companyId, employeeId, annualDays, usedDays }`
-   - Storage key: `sf_leave_balances`
-   - Store functions: `setLeaveBalance(companyId, employeeId, annualDays)`, `getLeaveBalance(companyId, employeeId): LeaveBalance | undefined`, `getCompanyLeaveBalances(companyId): LeaveBalance[]`
-   - When a leave record is added (addLeaveRecord), auto-increment usedDays if balance exists
-   - Company dashboard > Employees tab: inline leave balance display (X/Y gün) with edit button to set annual entitlement per employee
-   - Employee dashboard > Leave Requests tab: show remaining balance per company
-
-2. **Çoklu şirket konsolide görünümü (Multi-Company Consolidated View)**
-   - New tab in EmployeeDashboard: "Özet" (overview)
-   - Shows one summary card per company the employee belongs to
-   - Each card shows: company name, this month attendance days, leave days, check-in status today, remaining leave balance (if set)
-   - No new store functions needed; uses existing getMonthlyAttendanceSummary, getLeaveBalance, getLastAttendanceStatus
-
-3. **Duyuru sistemi (Announcement System)**
-   - New `Announcement` interface: `{ id, companyId, title, content, createdAt, pinned?: boolean }`
-   - Storage key: `sf_announcements`
-   - Store functions: `addAnnouncement(companyId, title, content, pinned?)`, `deleteAnnouncement(id, companyId)`, `getCompanyAnnouncements(companyId): Announcement[]`
-   - Company dashboard: new "Duyurular" tab to create/delete announcements
-   - Employee dashboard: show active announcements per company in the companies tab (small banner below company name)
-   - KioskMode component: show pinned announcements at top
+1. **Program Planlama (schedule) sekmesi** -- Şirket panelinde yeni sekme. Takvim görünümünde (haftalık/aylık) hangi personelin hangi günlerde çalışacağını yönetici planlayabilsin. Her hücreye vardiya atanabilsin. Personel panelinde de kendi programını görüntülesin.
+2. **Fazla Mesai Onayı** -- Fazla mesai otomatik tespit edildiğinde 'overtimelog' listesinde 'pending' durumda kaydedilsin. Şirket panelinde yeni 'overtimeapprovals' sekmesinde yönetici onaylayabilsin/reddedebilsin. Onaylanmamış fazla mesai bordro raporunda farklı işaretlensin.
+3. **Taleplere Belge Eki** -- İzin talebi ve devam düzeltme talebi formlarına dosya yükleme alanı eklensin. Dosya base64 olarak talep kaydına eklenmesi, yönetici onay ekranında görüntülenebilmesi.
 
 ### Modify
-- `store.ts`: Add LeaveBalance and Announcement interfaces + CRUD functions; modify `addLeaveRecord` to auto-increment usedDays
-- `CompanyDashboard.tsx`: Add leave balance editing in employees tab + new announcements tab
-- `EmployeeDashboard.tsx`: Add consolidated overview tab + show announcements per company + show leave balance in leave requests tab
-- `KioskMode.tsx`: Show pinned announcements
-- `i18n.ts`: Add translation keys for all 3 features in all 10 languages
+- store.ts: WorkSchedule tipi (companyId, week/month, employeeId -> shiftId/off), OvertimeLog tipi (recordId, employeeId, companyId, minutes, status: pending|approved|rejected, reviewedAt, reviewedBy), LeaveRequest ve CorrectionRequest tiplerine optional `documentBase64` ve `documentName` alanları eklenmesi.
+- i18n.ts: Yeni özellikler için çeviriler (tr + en zorunlu, diğer 8 dil).
+- CompanyDashboard: 2 yeni sekme (schedule, overtimeapprovals).
+- EmployeeDashboard: Program sekmesi (readonly, kendi programını görmesi).
 
 ### Remove
-- Nothing
+- Hiçbir şey kaldırılmıyor.
 
 ## Implementation Plan
-1. Update store.ts with LeaveBalance and Announcement interfaces + functions, modify addLeaveRecord
-2. Update i18n.ts with new translation keys
-3. Update CompanyDashboard.tsx with leave balance in employees tab and new announcements tab
-4. Update EmployeeDashboard.tsx with consolidated overview tab, announcement display, leave balance
-5. Update KioskMode.tsx to show pinned announcements
+1. store.ts'e WorkSchedule, OvertimeLog tipleri ve ilgili CRUD fonksiyonları ekle. LeaveRequest/CorrectionRequest tiplerine documentBase64/documentName ekle.
+2. i18n.ts'e yeni key'ler ekle (schedule, overtimeapprovals, document attachment vb.).
+3. CompanyDashboard'a 'schedule' ve 'overtimeapprovals' sekmeleri ekle.
+4. EmployeeDashboard'a 'schedule' sekmesi (read-only) ekle.
+5. İzin talebi ve düzeltme talebi formlarına dosya yükleme input'u ekle (hem şirket hem personel paneli).
+6. Bordro raporunda onaylanmamış fazla mesaiye farklı badge/renk ekle.
