@@ -1,10 +1,12 @@
 import {
+  BarChart3,
   Camera,
   ClipboardList,
   Clock,
   LogOut,
   Moon,
   Pencil,
+  Pin,
   Plus,
   QrCode,
   Sun,
@@ -17,18 +19,28 @@ import type { Page, Session } from "../App";
 import { LANGUAGES, type Lang } from "../i18n";
 import { useQRScanner } from "../qr-code/useQRScanner";
 import {
+  type Announcement,
   type AttendanceRecord,
   type Company,
   type CorrectionRequest,
   type Employee,
+  type LeaveRequest,
   addCorrectionRequest,
+  addLeaveRequest,
+  endBreak,
+  getActiveBreak,
   getCompany,
+  getCompanyAnnouncements,
   getEmployee,
   getEmployeeAttendance,
   getEmployeeCorrectionRequests,
+  getEmployeeLeaveRequests,
   getLastAttendanceStatus,
+  getLeaveBalance,
+  getMonthlyAttendanceSummary,
   getRecordDuration,
   joinCompany,
+  startBreak,
   toggleAttendance,
   updateEmployee,
 } from "../store";
@@ -44,7 +56,13 @@ interface Props {
   onLogout: () => void;
 }
 
-type Tab = "companies" | "history" | "qr" | "corrections";
+type Tab =
+  | "summary"
+  | "companies"
+  | "history"
+  | "qr"
+  | "corrections"
+  | "leaverequests";
 
 function formatDate(ts: number) {
   return new Date(ts).toLocaleString();
@@ -103,6 +121,20 @@ export default function EmployeeDashboard({
   const [corrReason, setCorrReason] = useState("");
   const [submittingCorr, setSubmittingCorr] = useState(false);
 
+  // Break tracking state
+  const [activeBreaks, setActiveBreaks] = useState<Record<string, boolean>>({});
+
+  // Advance leave requests state
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+  const [showAddLeaveReq, setShowAddLeaveReq] = useState(false);
+  const [leaveReqCompanyId, setLeaveReqCompanyId] = useState("");
+  const [leaveReqDate, setLeaveReqDate] = useState("");
+  const [leaveReqType, setLeaveReqType] = useState<"leave" | "sick" | "excuse">(
+    "leave",
+  );
+  const [leaveReqReason, setLeaveReqReason] = useState("");
+  const [submittingLeaveReq, setSubmittingLeaveReq] = useState(false);
+
   const loadEmployee = useCallback(() => {
     const emp = getEmployee(session.id);
     if (!emp) return;
@@ -121,6 +153,22 @@ export default function EmployeeDashboard({
     setCheckinStatus(statuses);
     setAllEmpAttendance(getEmployeeAttendance(session.id));
     // Load correction requests for all companies
+    // Load break status
+    const breaks: Record<string, boolean> = {};
+    for (const cid of emp.companyIds) {
+      const ab = getActiveBreak(emp.id, cid);
+      breaks[cid] = !!ab;
+    }
+    setActiveBreaks(breaks);
+
+    // Load leave requests
+    const allLeaveReqs: LeaveRequest[] = [];
+    for (const cid of emp.companyIds) {
+      const reqs = getEmployeeLeaveRequests(emp.id, cid);
+      allLeaveReqs.push(...reqs);
+    }
+    setLeaveRequests(allLeaveReqs);
+
     const allCorr: CorrectionRequest[] = [];
     for (const cid of emp.companyIds) {
       allCorr.push(...getEmployeeCorrectionRequests(session.id, cid));
@@ -260,6 +308,11 @@ export default function EmployeeDashboard({
   ).length;
 
   const tabs: { key: Tab; label: string; icon: React.ReactNode }[] = [
+    {
+      key: "summary",
+      label: t("consolidatedView"),
+      icon: <BarChart3 size={16} />,
+    },
     { key: "companies", label: t("myCompanies"), icon: <User size={16} /> },
     {
       key: "history",
@@ -270,6 +323,11 @@ export default function EmployeeDashboard({
     {
       key: "corrections",
       label: t("correctionRequests"),
+      icon: <ClipboardList size={16} />,
+    },
+    {
+      key: "leaverequests",
+      label: t("leaveRequests"),
       icon: <ClipboardList size={16} />,
     },
   ];
@@ -353,6 +411,102 @@ export default function EmployeeDashboard({
       </nav>
 
       <main className="flex-1 p-4 md:p-6 max-w-3xl mx-auto w-full">
+        {tab === "summary" && (
+          <div>
+            <h2 className="text-xl font-bold mb-6">{t("consolidatedView")}</h2>
+            {companies.length === 0 ? (
+              <div
+                data-ocid="summary.empty_state"
+                className="text-center py-16 text-muted-foreground"
+              >
+                <div className="text-4xl mb-3">🏢</div>
+                <div>{t("noCompanies")}</div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {companies.map((company) => {
+                  const status = checkinStatus[company.id];
+                  const isCheckedIn = status?.isCheckedIn ?? false;
+                  const now = new Date();
+                  const summary = employee
+                    ? getMonthlyAttendanceSummary(
+                        company.id,
+                        now.getFullYear(),
+                        now.getMonth(),
+                      )
+                    : [];
+                  const myRow = summary.find(
+                    (r) => r.employee.id === session.id,
+                  );
+                  const balance = employee
+                    ? getLeaveBalance(company.id, session.id)
+                    : undefined;
+                  return (
+                    <div
+                      key={company.id}
+                      data-ocid="summary.card"
+                      className="bg-card border border-border rounded-2xl p-5"
+                    >
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="font-semibold text-lg">
+                          {company.name}
+                        </div>
+                        <div
+                          className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${isCheckedIn ? "bg-green-500/20 text-green-400" : "bg-gray-500/20 text-gray-400"}`}
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${isCheckedIn ? "bg-green-400 animate-pulse" : "bg-gray-400"}`}
+                          />
+                          {isCheckedIn ? t("checkedIn") : t("checkedOut")}
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-3 gap-3 mb-3">
+                        <div className="bg-muted/40 rounded-xl p-3 text-center">
+                          <div className="text-lg font-bold">
+                            {myRow?.daysAttended ?? 0}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {t("attendanceDays")}
+                          </div>
+                        </div>
+                        <div className="bg-muted/40 rounded-xl p-3 text-center">
+                          <div className="text-lg font-bold">
+                            {myRow?.leaveDays ?? 0}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {t("leaveTypeLeave")}
+                          </div>
+                        </div>
+                        <div className="bg-muted/40 rounded-xl p-3 text-center">
+                          <div className="text-lg font-bold">
+                            {myRow
+                              ? Math.round(myRow.totalWorkMinutes / 60)
+                              : 0}
+                            h
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {t("thisMonth")}
+                          </div>
+                        </div>
+                      </div>
+                      {balance && (
+                        <div className="text-sm text-muted-foreground">
+                          {t("remainingDays")}:{" "}
+                          <span className="font-semibold text-foreground">
+                            {balance.annualDays - balance.usedDays}
+                          </span>{" "}
+                          {t("remainingDays").toLowerCase()} ({balance.usedDays}
+                          /{balance.annualDays} {t("usedDays").toLowerCase()})
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {tab === "companies" && (
           <div>
             <div className="flex items-center justify-between mb-6">
@@ -447,6 +601,74 @@ export default function EmployeeDashboard({
                           <Camera size={20} />
                         </button>
                       </div>
+                      {isCheckedIn && (
+                        <div className="mt-3 flex gap-3">
+                          {activeBreaks[company.id] ? (
+                            <button
+                              type="button"
+                              data-ocid="companies.secondary_button"
+                              onClick={() => {
+                                const res = endBreak(session.id, company.id);
+                                if (res.ok) {
+                                  toast.success(t("breakEnd"));
+                                  loadEmployee();
+                                } else toast.error(res.message);
+                              }}
+                              className="flex-1 py-2 rounded-xl text-sm font-medium bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400 border border-yellow-500/30 transition-all"
+                            >
+                              ☕ {t("breakEnd")} ({t("onBreak")})
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              data-ocid="companies.secondary_button"
+                              onClick={() => {
+                                const res = startBreak(session.id, company.id);
+                                if (res.ok) {
+                                  toast.success(t("breakStart"));
+                                  loadEmployee();
+                                } else toast.error(res.message);
+                              }}
+                              className="flex-1 py-2 rounded-xl text-sm font-medium bg-muted hover:bg-muted/80 text-muted-foreground border border-border transition-all"
+                            >
+                              ☕ {t("breakStart")}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      {/* Announcements */}
+                      {(() => {
+                        const anns = getCompanyAnnouncements(company.id).slice(
+                          0,
+                          3,
+                        );
+                        if (anns.length === 0) return null;
+                        return (
+                          <div className="mt-3 pt-3 border-t border-border space-y-2">
+                            {anns.map((ann) => (
+                              <div
+                                key={ann.id}
+                                className="flex items-start gap-2"
+                              >
+                                {ann.pinned && (
+                                  <Pin
+                                    size={12}
+                                    className="text-blue-400 mt-0.5 flex-shrink-0"
+                                  />
+                                )}
+                                <div className="min-w-0">
+                                  <div className="text-xs font-semibold truncate">
+                                    {ann.title}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground line-clamp-2">
+                                    {ann.content}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 })}
@@ -678,7 +900,229 @@ export default function EmployeeDashboard({
             )}
           </div>
         )}
+        {tab === "leaverequests" && (
+          <div>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold">{t("leaveRequests")}</h2>
+              <button
+                type="button"
+                data-ocid="leaverequests.open_modal_button"
+                onClick={() => setShowAddLeaveReq(true)}
+                className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium px-4 py-2 rounded-xl transition-colors"
+              >
+                <Plus size={16} />
+                {t("requestLeave")}
+              </button>
+            </div>
+            {leaveRequests.length === 0 ? (
+              <div
+                data-ocid="leaverequests.empty_state"
+                className="text-center py-16 text-muted-foreground"
+              >
+                <div className="text-4xl mb-3">📋</div>
+                <div>{t("noRecords")}</div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {leaveRequests.map((req, idx) => {
+                  const comp = companies.find((c) => c.id === req.companyId);
+                  return (
+                    <div
+                      key={req.id}
+                      data-ocid={`leaverequests.item.${idx + 1}`}
+                      className="bg-card border border-border rounded-xl p-4"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-medium text-sm">
+                              {comp?.name || req.companyId}
+                            </span>
+                            {(() => {
+                              const bal = getLeaveBalance(
+                                req.companyId,
+                                session.id,
+                              );
+                              if (!bal) return null;
+                              const remaining = bal.annualDays - bal.usedDays;
+                              return (
+                                <span className="text-xs text-muted-foreground">
+                                  ({remaining}{" "}
+                                  {t("remainingDays").toLowerCase()})
+                                </span>
+                              );
+                            })()}
+                            <span
+                              className={`text-xs px-2 py-0.5 rounded-full font-medium ${req.status === "pending" ? "bg-orange-500/20 text-orange-400" : req.status === "approved" ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}
+                            >
+                              {t(req.status)}
+                            </span>
+                            <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
+                              {req.leaveType === "leave"
+                                ? t("leaveTypeLeave")
+                                : req.leaveType === "sick"
+                                  ? t("leaveTypeSick")
+                                  : t("leaveTypeExcuse")}
+                            </span>
+                          </div>
+                          <div className="text-sm text-muted-foreground font-mono">
+                            {req.date}
+                          </div>
+                          {req.reason && (
+                            <div className="text-xs text-muted-foreground mt-1 italic">
+                              {req.reason}
+                            </div>
+                          )}
+                          {req.rejectionNote && (
+                            <div className="text-xs text-red-400 mt-1">
+                              {t("rejectionNote")}: {req.rejectionNote}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </main>
+
+      {showAddLeaveReq && (
+        <dialog
+          open
+          className="fixed inset-0 bg-black/60 flex items-center justify-center p-6 z-50 m-0 max-w-none w-full h-full border-0"
+        >
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: modal backdrop */}
+          <div
+            className="fixed inset-0"
+            onClick={() => setShowAddLeaveReq(false)}
+          />
+          <div
+            data-ocid="leaverequests.dialog"
+            className="bg-card border border-border rounded-2xl p-6 w-full max-w-md shadow-2xl relative z-10"
+          >
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-bold">{t("requestLeave")}</h3>
+              <button
+                type="button"
+                onClick={() => setShowAddLeaveReq(false)}
+                className="p-1 hover:bg-muted rounded-lg"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <div className="text-sm font-medium mb-2">
+                  {t("selectCompany")}
+                </div>
+                <select
+                  value={leaveReqCompanyId}
+                  onChange={(e) => setLeaveReqCompanyId(e.target.value)}
+                  data-ocid="leaverequests.select"
+                  className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                >
+                  <option value="">{t("selectCompany")}</option>
+                  {companies.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <div className="text-sm font-medium mb-2">
+                  {t("leaveRequestDate")}
+                </div>
+                <input
+                  type="date"
+                  value={leaveReqDate}
+                  onChange={(e) => setLeaveReqDate(e.target.value)}
+                  data-ocid="leaverequests.input"
+                  className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+              <div>
+                <div className="text-sm font-medium mb-2">{t("leaveType")}</div>
+                <select
+                  value={leaveReqType}
+                  onChange={(e) =>
+                    setLeaveReqType(
+                      e.target.value as "leave" | "sick" | "excuse",
+                    )
+                  }
+                  className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                >
+                  <option value="leave">{t("leaveTypeLeave")}</option>
+                  <option value="sick">{t("leaveTypeSick")}</option>
+                  <option value="excuse">{t("leaveTypeExcuse")}</option>
+                </select>
+              </div>
+              <div>
+                <div className="text-sm font-medium mb-2">
+                  {t("leaveReason")}
+                </div>
+                <textarea
+                  value={leaveReqReason}
+                  onChange={(e) => setLeaveReqReason(e.target.value)}
+                  data-ocid="leaverequests.textarea"
+                  rows={3}
+                  className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-none"
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddLeaveReq(false)}
+                  data-ocid="leaverequests.cancel_button"
+                  className="flex-1 border border-border py-3 rounded-xl text-sm font-medium hover:bg-muted transition-colors"
+                >
+                  {t("cancel")}
+                </button>
+                <button
+                  type="button"
+                  data-ocid="leaverequests.submit_button"
+                  disabled={submittingLeaveReq}
+                  onClick={() => {
+                    if (
+                      !leaveReqCompanyId ||
+                      !leaveReqDate ||
+                      !leaveReqReason.trim()
+                    ) {
+                      toast.error(t("error"));
+                      return;
+                    }
+                    setSubmittingLeaveReq(true);
+                    const res = addLeaveRequest(
+                      leaveReqCompanyId,
+                      session.id,
+                      leaveReqDate,
+                      leaveReqType,
+                      leaveReqReason,
+                    );
+                    setSubmittingLeaveReq(false);
+                    if (!res.ok) {
+                      toast.error(res.message);
+                      return;
+                    }
+                    toast.success(t("correctionSubmitted"));
+                    setShowAddLeaveReq(false);
+                    setLeaveReqCompanyId("");
+                    setLeaveReqDate("");
+                    setLeaveReqReason("");
+                    loadEmployee();
+                  }}
+                  className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white py-3 rounded-xl text-sm font-semibold transition-colors"
+                >
+                  {submittingLeaveReq ? t("loading") : t("requestLeave")}
+                </button>
+              </div>
+            </div>
+          </div>
+        </dialog>
+      )}
 
       {showJoin && (
         <dialog

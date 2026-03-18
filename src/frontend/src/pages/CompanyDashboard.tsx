@@ -12,10 +12,13 @@ import {
   Download,
   EyeOff,
   LogOut,
+  Megaphone,
   Moon,
   Pencil,
+  Pin,
   Plus,
   QrCode,
+  ScrollText,
   Settings,
   Sun,
   Trash2,
@@ -39,23 +42,36 @@ import {
 } from "recharts";
 import { toast } from "sonner";
 import type { Page, Session } from "../App";
+import AlertsPanel from "../components/AlertsPanel";
+import PayrollReport from "../components/PayrollReport";
 import { LANGUAGES, type Lang } from "../i18n";
 import {
+  type Announcement,
   type AttendanceRecord,
+  type AuditEntry,
   type CorrectionRequest,
   type Employee,
   type InviteCode,
+  type LeaveBalance,
   type LeaveRecord,
+  type LeaveRequest,
+  type MissingCheckout,
   type MonthlySummaryRow,
   type PublicHoliday,
   type Shift,
+  addAnnouncement,
+  addAuditEntry,
+  addAutoCheckoutRecord,
   addLeaveRecord,
+  addMissingCheckoutFlag,
   addPublicHoliday,
   approveCorrectionRequest,
+  approveLeaveRequest,
   assignEmployeeShift,
   cancelInviteCode,
   clearEmployeePersonalWorkHours,
   createInviteCode,
+  deleteAnnouncement,
   deleteLeaveRecord,
   deletePublicHoliday,
   exportAllData,
@@ -63,15 +79,21 @@ import {
   getAllCompanyAttendance,
   getCheckedInEmployees,
   getCompany,
+  getCompanyAnnouncements,
   getCompanyAttendance,
+  getCompanyAuditLog,
   getCompanyCorrectionRequests,
   getCompanyDepartments,
   getCompanyEmployees,
   getCompanyHolidays,
   getCompanyInviteCodes,
+  getCompanyLeaveBalances,
   getCompanyLeaveRecords,
+  getCompanyLeaveRequests,
   getDailyCheckinCount,
   getInviteCodeStatus,
+  getLeaveBalance,
+  getMissingCheckouts,
   getMonthlyAttendanceSummary,
   getOvertimeMinutes,
   getRecordDuration,
@@ -80,7 +102,10 @@ import {
   isEarlyCheckout,
   isLateCheckin,
   rejectCorrectionRequest,
+  rejectLeaveRequest,
+  setLeaveBalance,
   toggleEmployeeActive,
+  updateCompanyAutoCheckout,
   updateCompanyMinHours,
   updateCompanyShifts,
   updateCompanyWorkDays,
@@ -89,6 +114,8 @@ import {
   updateEmployeePersonalMinHours,
   updateEmployeePersonalWorkHours,
 } from "../store";
+
+import KioskMode from "../components/KioskMode";
 
 interface Props {
   lang: Lang;
@@ -110,6 +137,11 @@ type Tab =
   | "summary"
   | "statistics"
   | "corrections"
+  | "leaverequests"
+  | "payroll"
+  | "alerts"
+  | "auditlog"
+  | "announcements"
   | "settings";
 
 function formatDate(ts: number) {
@@ -216,12 +248,65 @@ export default function CompanyDashboard({
   const [rejectingId, setRejectingId] = useState("");
   const [rejectionNote, setRejectionNote] = useState("");
 
+  // Leave requests state
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+  const [leaveReqFilter, setLeaveReqFilter] = useState<"pending" | "all">(
+    "pending",
+  );
+  const [rejectingLeaveId, setRejectingLeaveId] = useState("");
+  const [leaveRejectionNote, setLeaveRejectionNote] = useState("");
+
+  // Bulk operations state
+  const [selectedEmployees, setSelectedEmployees] = useState<Set<string>>(
+    new Set(),
+  );
+  const [bulkDept, setBulkDept] = useState("");
+  const [bulkShiftId, setBulkShiftId] = useState("");
+  const [bulkLeaveDate, setBulkLeaveDate] = useState("");
+  const [bulkLeaveType, setBulkLeaveType] =
+    useState<LeaveRecord["type"]>("leave");
+
+  // Audit log state
+  const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
+  const [auditFilterFrom, setAuditFilterFrom] = useState("");
+  const [auditFilterTo, setAuditFilterTo] = useState("");
+  const [auditFilterAction, setAuditFilterAction] = useState("");
+
+  // Auto checkout state
+  const [autoCheckoutEnabled, setAutoCheckoutEnabled] = useState(
+    () => getCompany(session.id)?.autoCheckout?.enabled ?? false,
+  );
+  const [autoCheckoutMode, setAutoCheckoutMode] = useState<"auto" | "flag">(
+    () => getCompany(session.id)?.autoCheckout?.mode ?? "flag",
+  );
+  const [savingAutoCheckout, setSavingAutoCheckout] = useState(false);
+
+  // Kiosk mode state
+  const [kioskMode, setKioskMode] = useState(false);
+
+  // Missing checkouts
+  const [missingCheckouts, setMissingCheckouts] = useState<MissingCheckout[]>(
+    [],
+  );
+
   // Personal rules state (per employee expand)
   const [expandedPersonalEmpId, setExpandedPersonalEmpId] = useState("");
   const [personalStart, setPersonalStart] = useState("");
   const [personalEnd, setPersonalEnd] = useState("");
   const [personalMinH, setPersonalMinH] = useState("");
   const [savingPersonal, setSavingPersonal] = useState(false);
+
+  // Announcements state
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [newAnnTitle, setNewAnnTitle] = useState("");
+  const [newAnnContent, setNewAnnContent] = useState("");
+  const [newAnnPinned, setNewAnnPinned] = useState(false);
+  const [savingAnn, setSavingAnn] = useState(false);
+
+  // Leave balance state
+  const [leaveBalances, setLeaveBalances] = useState<LeaveBalance[]>([]);
+  const [editBalanceEmpId, setEditBalanceEmpId] = useState("");
+  const [editBalanceValue, setEditBalanceValue] = useState("");
 
   const loadData = useCallback(() => {
     setInviteCodes(getCompanyInviteCodes(session.id));
@@ -237,6 +322,11 @@ export default function CompanyDashboard({
     setAllAttendance(getAllCompanyAttendance(session.id));
     setHolidays(getCompanyHolidays(session.id));
     setCorrectionRequests(getCompanyCorrectionRequests(session.id));
+    setLeaveRequests(getCompanyLeaveRequests(session.id));
+    setAuditEntries(getCompanyAuditLog(session.id));
+    setMissingCheckouts(getMissingCheckouts(session.id));
+    setAnnouncements(getCompanyAnnouncements(session.id));
+    setLeaveBalances(getCompanyLeaveBalances(session.id));
   }, [session.id]);
 
   const loadAttendance = useCallback(() => {
@@ -273,6 +363,60 @@ export default function CompanyDashboard({
       setWorkDays(comp.workDays);
     }
   }, [loadData, session.id]);
+
+  // Auto-checkout interval
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const comp = getCompany(session.id);
+      if (!comp?.autoCheckout?.enabled) return;
+      const now = new Date();
+      const checkedIn = getCheckedInEmployees(session.id);
+      for (const { employee, checkinTimestamp } of checkedIn) {
+        const assignedShiftId = employee.assignedShifts?.[session.id];
+        const assignedShift = assignedShiftId
+          ? (comp.shifts || []).find((s) => s.id === assignedShiftId)
+          : undefined;
+        const endTimeStr =
+          employee.personalWorkHours?.[session.id]?.end ||
+          assignedShift?.endTime ||
+          comp.workHours?.end;
+        if (!endTimeStr) continue;
+        const [endH, endM] = endTimeStr.split(":").map(Number);
+        const shiftEndToday = new Date(now);
+        shiftEndToday.setHours(endH, endM, 0, 0);
+        if (now > shiftEndToday) {
+          const dateStr = now.toISOString().split("T")[0];
+          if (comp.autoCheckout?.mode === "auto") {
+            addAutoCheckoutRecord(
+              employee.id,
+              employee.fullName,
+              session.id,
+              shiftEndToday.getTime(),
+            );
+            addAuditEntry({
+              timestamp: Date.now(),
+              actorType: "company",
+              actorId: session.id,
+              actorName: session.name,
+              companyId: session.id,
+              action: "auto_checkout",
+              details: `Auto check-out: ${employee.fullName} at ${endTimeStr}`,
+            });
+          } else {
+            addMissingCheckoutFlag({
+              employeeId: employee.id,
+              employeeName: employee.fullName,
+              companyId: session.id,
+              date: dateStr,
+              checkinTimestamp,
+            });
+          }
+          loadData();
+        }
+      }
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [session.id, session.name, loadData]);
 
   useEffect(() => {
     loadAttendance();
@@ -461,9 +605,21 @@ export default function CompanyDashboard({
   }
 
   function handleToggleActive(empId: string) {
+    const emp = employees.find((e) => e.id === empId);
     const res = toggleEmployeeActive(empId, session.id);
     if (res.ok) {
       toast.success(res.active ? t("activate") : t("deactivate"));
+      if (emp) {
+        addAuditEntry({
+          timestamp: Date.now(),
+          actorType: "company",
+          actorId: session.id,
+          actorName: session.name,
+          companyId: session.id,
+          action: res.active ? "employee_activated" : "employee_deactivated",
+          details: `${emp.fullName} ${res.active ? "activated" : "deactivated"}`,
+        });
+      }
       loadData();
     } else toast.error(res.message);
   }
@@ -502,7 +658,20 @@ export default function CompanyDashboard({
   }
 
   function handleAssignShift(empId: string, shiftId: string) {
+    const emp = employees.find((e) => e.id === empId);
     assignEmployeeShift(empId, session.id, shiftId);
+    if (emp) {
+      const shift = (company?.shifts || []).find((s) => s.id === shiftId);
+      addAuditEntry({
+        timestamp: Date.now(),
+        actorType: "company",
+        actorId: session.id,
+        actorName: session.name,
+        companyId: session.id,
+        action: "shift_changed",
+        details: `Shift changed for ${emp.fullName}: ${shift ? shift.name : "none"}`,
+      });
+    }
     loadData();
   }
 
@@ -545,18 +714,42 @@ export default function CompanyDashboard({
   }
 
   function handleApproveCorrection(id: string) {
+    const req = correctionRequests.find((r) => r.id === id);
     const res = approveCorrectionRequest(id, session.id);
     if (res.ok) {
       toast.success(t("correctionApproved"));
+      if (req) {
+        addAuditEntry({
+          timestamp: Date.now(),
+          actorType: "company",
+          actorId: session.id,
+          actorName: session.name,
+          companyId: session.id,
+          action: "correction_approved",
+          details: `Correction approved for ${req.employeeName}: ${req.requestType} on ${req.requestedDate} ${req.requestedTime}`,
+        });
+      }
       loadData();
       loadAttendance();
     } else toast.error(res.message);
   }
 
   function handleRejectCorrection(id: string) {
+    const req = correctionRequests.find((r) => r.id === id);
     const res = rejectCorrectionRequest(id, session.id, rejectionNote);
     if (res.ok) {
       toast.success(t("correctionRejected"));
+      if (req) {
+        addAuditEntry({
+          timestamp: Date.now(),
+          actorType: "company",
+          actorId: session.id,
+          actorName: session.name,
+          companyId: session.id,
+          action: "correction_rejected",
+          details: `Correction rejected for ${req.employeeName}: ${req.requestType} on ${req.requestedDate} ${req.requestedTime}`,
+        });
+      }
       setRejectingId("");
       setRejectionNote("");
       loadData();
@@ -601,11 +794,46 @@ export default function CompanyDashboard({
     setSavingPersonal(false);
     if (ok) {
       toast.success(t("personalRulesSaved"));
+      const emp = employees.find((e) => e.id === empId);
+      if (emp) {
+        addAuditEntry({
+          timestamp: Date.now(),
+          actorType: "company",
+          actorId: session.id,
+          actorName: session.name,
+          companyId: session.id,
+          action: "personal_rules_changed",
+          details: `Personal rules updated for ${emp.fullName}`,
+        });
+      }
       setExpandedPersonalEmpId("");
       loadData();
     } else {
       toast.error(t("error"));
     }
+  }
+
+  function handleSaveAutoCheckout() {
+    setSavingAutoCheckout(true);
+    const res = updateCompanyAutoCheckout(
+      session.id,
+      autoCheckoutEnabled,
+      autoCheckoutMode,
+    );
+    setSavingAutoCheckout(false);
+    if (res.ok) {
+      toast.success(t("autoCheckoutSaved"));
+      addAuditEntry({
+        timestamp: Date.now(),
+        actorType: "company",
+        actorId: session.id,
+        actorName: session.name,
+        companyId: session.id,
+        action: "auto_checkout_settings_changed",
+        details: `Auto checkout: ${autoCheckoutEnabled ? "enabled" : "disabled"}, mode: ${autoCheckoutMode}`,
+      });
+      loadData();
+    } else toast.error(res.message);
   }
 
   // Statistics computations
@@ -699,6 +927,23 @@ export default function CompanyDashboard({
       label: t("correctionRequests"),
       icon: <ClipboardList size={16} />,
     },
+    {
+      key: "leaverequests",
+      label: t("leaveRequests"),
+      icon: <Calendar size={16} />,
+    },
+    { key: "payroll", label: t("payroll"), icon: <Database size={16} /> },
+    { key: "alerts", label: t("alerts"), icon: <AlertTriangle size={16} /> },
+    {
+      key: "auditlog",
+      label: t("auditLogTab"),
+      icon: <ScrollText size={16} />,
+    },
+    {
+      key: "announcements",
+      label: t("announcements"),
+      icon: <Megaphone size={16} />,
+    },
     { key: "settings", label: t("settings"), icon: <Settings size={16} /> },
   ];
 
@@ -771,6 +1016,13 @@ export default function CompanyDashboard({
                 {pendingCorrections.length}
               </span>
             )}
+            {tb.key === "leaverequests" &&
+              leaveRequests.filter((r) => r.status === "pending").length >
+                0 && (
+                <span className="ml-1 bg-blue-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">
+                  {leaveRequests.filter((r) => r.status === "pending").length}
+                </span>
+              )}
           </button>
         ))}
       </nav>
@@ -800,6 +1052,17 @@ export default function CompanyDashboard({
                 value={checkedInList.length}
                 color="orange"
               />
+            </div>
+            <div className="mt-4">
+              <button
+                type="button"
+                data-ocid="overview.primary_button"
+                onClick={() => setKioskMode(true)}
+                className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium px-4 py-2 rounded-xl transition-colors"
+              >
+                <Building2 size={16} />
+                {t("startKioskMode")}
+              </button>
             </div>
             {company?.authorizedPerson && (
               <div className="mt-6 bg-card border border-border rounded-xl p-4">
@@ -1021,6 +1284,131 @@ export default function CompanyDashboard({
                 {showInactive ? t("hideInactive") : t("showInactive")}
               </button>
             </div>
+            {selectedEmployees.size > 0 && (
+              <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-3 mb-4 flex flex-wrap items-center gap-3">
+                <span className="text-sm font-medium text-blue-400">
+                  {selectedEmployees.size} {t("selected")}
+                </span>
+                <div className="flex flex-wrap gap-2 flex-1">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={bulkDept}
+                      onChange={(e) => setBulkDept(e.target.value)}
+                      placeholder={t("bulkSetDepartment")}
+                      data-ocid="employees.input"
+                      className="bg-background border border-border rounded-lg px-2 py-1.5 text-xs w-36 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      data-ocid="employees.primary_button"
+                      onClick={() => {
+                        if (!bulkDept.trim()) return;
+                        for (const id of selectedEmployees)
+                          updateEmployeeDepartment(id, session.id, bulkDept);
+                        toast.success(t("success"));
+                        setBulkDept("");
+                        setSelectedEmployees(new Set());
+                        loadData();
+                      }}
+                      className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded-lg"
+                    >
+                      {t("applyBulkAction")}
+                    </button>
+                  </div>
+                  {(company?.shifts?.length ?? 0) > 0 && (
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={bulkShiftId}
+                        onChange={(e) => setBulkShiftId(e.target.value)}
+                        className="bg-background border border-border rounded-lg px-2 py-1.5 text-xs focus:outline-none"
+                      >
+                        <option value="">{t("bulkAssignShift")}</option>
+                        {(company?.shifts ?? []).map((sh) => (
+                          <option key={sh.id} value={sh.id}>
+                            {sh.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!bulkShiftId) return;
+                          for (const id of selectedEmployees)
+                            assignEmployeeShift(id, session.id, bulkShiftId);
+                          toast.success(t("success"));
+                          setBulkShiftId("");
+                          setSelectedEmployees(new Set());
+                          loadData();
+                        }}
+                        className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded-lg"
+                      >
+                        {t("applyBulkAction")}
+                      </button>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="date"
+                      value={bulkLeaveDate}
+                      onChange={(e) => setBulkLeaveDate(e.target.value)}
+                      className="bg-background border border-border rounded-lg px-2 py-1.5 text-xs focus:outline-none"
+                    />
+                    <select
+                      value={bulkLeaveType}
+                      onChange={(e) =>
+                        setBulkLeaveType(e.target.value as LeaveRecord["type"])
+                      }
+                      className="bg-background border border-border rounded-lg px-2 py-1.5 text-xs focus:outline-none"
+                    >
+                      <option value="leave">{t("leaveTypeLeave")}</option>
+                      <option value="sick">{t("leaveTypeSick")}</option>
+                      <option value="excuse">{t("leaveTypeExcuse")}</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!bulkLeaveDate) return;
+                        for (const id of selectedEmployees)
+                          addLeaveRecord(
+                            session.id,
+                            id,
+                            bulkLeaveDate,
+                            bulkLeaveType,
+                          );
+                        toast.success(t("success"));
+                        setBulkLeaveDate("");
+                        setSelectedEmployees(new Set());
+                        loadData();
+                      }}
+                      className="bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1.5 rounded-lg"
+                    >
+                      {t("bulkAddLeave")}
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      for (const id of selectedEmployees)
+                        toggleEmployeeActive(id, session.id);
+                      toast.success(t("success"));
+                      setSelectedEmployees(new Set());
+                      loadData();
+                    }}
+                    className="border border-orange-500/40 text-orange-400 hover:bg-orange-500/10 text-xs px-3 py-1.5 rounded-lg"
+                  >
+                    {t("bulkToggleActive")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedEmployees(new Set())}
+                    className="text-xs text-muted-foreground hover:text-foreground px-2 py-1.5"
+                  >
+                    {t("cancel")}
+                  </button>
+                </div>
+              </div>
+            )}
             {employees.length === 0 ? (
               <EmptyState text={t("noEmployees")} />
             ) : (
@@ -1047,6 +1435,17 @@ export default function CompanyDashboard({
                         }`}
                       >
                         <div className="flex flex-wrap items-center gap-2 px-4 py-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedEmployees.has(emp.id)}
+                            onChange={(e) => {
+                              const next = new Set(selectedEmployees);
+                              if (e.target.checked) next.add(emp.id);
+                              else next.delete(emp.id);
+                              setSelectedEmployees(next);
+                            }}
+                            className="rounded flex-shrink-0"
+                          />
                           <div className="flex-1 min-w-0">
                             <span className="font-medium text-sm">
                               {emp.fullName}
@@ -1165,6 +1564,87 @@ export default function CompanyDashboard({
                             )}
                             {isActive ? t("deactivate") : t("activate")}
                           </button>
+                          {/* Leave balance */}
+                          <div className="hidden lg:flex items-center gap-1">
+                            {editBalanceEmpId === emp.id ? (
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max="365"
+                                  value={editBalanceValue}
+                                  onChange={(e) =>
+                                    setEditBalanceValue(e.target.value)
+                                  }
+                                  placeholder="0"
+                                  className="bg-background border border-border rounded px-2 py-1 text-xs w-16 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const days = Number.parseInt(
+                                      editBalanceValue,
+                                      10,
+                                    );
+                                    if (!Number.isNaN(days)) {
+                                      setLeaveBalance(session.id, emp.id, days);
+                                      toast.success(t("leaveBalanceSaved"));
+                                      loadData();
+                                    }
+                                    setEditBalanceEmpId("");
+                                    setEditBalanceValue("");
+                                  }}
+                                  className="p-1 hover:bg-green-500/10 text-green-400 rounded text-xs"
+                                >
+                                  <Check size={12} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditBalanceEmpId("");
+                                    setEditBalanceValue("");
+                                  }}
+                                  className="p-1 hover:bg-muted rounded text-xs"
+                                >
+                                  <X size={12} />
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const bal = leaveBalances.find(
+                                    (b) => b.employeeId === emp.id,
+                                  );
+                                  setEditBalanceEmpId(emp.id);
+                                  setEditBalanceValue(
+                                    bal ? String(bal.annualDays) : "",
+                                  );
+                                }}
+                                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground group"
+                                title={t("leaveBalance")}
+                              >
+                                {(() => {
+                                  const bal = leaveBalances.find(
+                                    (b) => b.employeeId === emp.id,
+                                  );
+                                  return bal ? (
+                                    <span className="text-xs">
+                                      {bal.usedDays}/{bal.annualDays} gün
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs opacity-50">
+                                      {t("setBalance")}
+                                    </span>
+                                  );
+                                })()}
+                                <Pencil
+                                  size={10}
+                                  className="opacity-0 group-hover:opacity-60"
+                                />
+                              </button>
+                            )}
+                          </div>
                           {/* Personal rules toggle */}
                           <button
                             type="button"
@@ -1569,6 +2049,19 @@ export default function CompanyDashboard({
                                     {t("overtime")}: {overtime}dk
                                   </span>
                                 )}
+                                {rec.recordType === "checkin" &&
+                                  missingCheckouts.some(
+                                    (mc) =>
+                                      mc.employeeId === rec.employeeId &&
+                                      mc.date ===
+                                        new Date(rec.timestamp)
+                                          .toISOString()
+                                          .split("T")[0],
+                                  ) && (
+                                    <span className="text-xs px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 font-medium">
+                                      {t("missingCheckout")}
+                                    </span>
+                                  )}
                               </div>
                             </td>
                             <td className="px-4 py-3 text-muted-foreground">
@@ -2000,6 +2493,427 @@ export default function CompanyDashboard({
           </div>
         )}
 
+        {tab === "leaverequests" && (
+          <div>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold">{t("leaveRequests")}</h2>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setLeaveReqFilter("pending")}
+                  className={`text-sm px-3 py-1.5 rounded-lg border transition-colors ${leaveReqFilter === "pending" ? "bg-blue-500/20 border-blue-500/40 text-blue-400" : "border-border text-muted-foreground hover:bg-muted"}`}
+                >
+                  {t("pending")} (
+                  {leaveRequests.filter((r) => r.status === "pending").length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLeaveReqFilter("all")}
+                  className={`text-sm px-3 py-1.5 rounded-lg border transition-colors ${leaveReqFilter === "all" ? "bg-blue-500/20 border-blue-500/40 text-blue-400" : "border-border text-muted-foreground hover:bg-muted"}`}
+                >
+                  {t("allEmployees")}
+                </button>
+              </div>
+            </div>
+            {(() => {
+              const filtered =
+                leaveReqFilter === "pending"
+                  ? leaveRequests.filter((r) => r.status === "pending")
+                  : leaveRequests;
+              if (filtered.length === 0)
+                return (
+                  <div
+                    data-ocid="leaverequests.empty_state"
+                    className="text-center py-16 text-muted-foreground"
+                  >
+                    <div className="text-4xl mb-3">📋</div>
+                    <div>{t("noRecords")}</div>
+                  </div>
+                );
+              return (
+                <div className="space-y-3">
+                  {filtered.map((req) => (
+                    <div
+                      key={req.id}
+                      data-ocid="leaverequests.row"
+                      className="bg-card border border-border rounded-xl p-4"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-medium text-sm">
+                              {req.employeeName}
+                            </span>
+                            <span
+                              className={`text-xs px-2 py-0.5 rounded-full font-medium ${req.status === "pending" ? "bg-orange-500/20 text-orange-400" : req.status === "approved" ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}
+                            >
+                              {t(req.status)}
+                            </span>
+                            <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
+                              {req.leaveType === "leave"
+                                ? t("leaveTypeLeave")
+                                : req.leaveType === "sick"
+                                  ? t("leaveTypeSick")
+                                  : t("leaveTypeExcuse")}
+                            </span>
+                          </div>
+                          <div className="text-sm text-muted-foreground font-mono">
+                            {req.date}
+                          </div>
+                          {req.reason && (
+                            <div className="text-xs text-muted-foreground mt-1 italic">
+                              {req.reason}
+                            </div>
+                          )}
+                          {req.rejectionNote && (
+                            <div className="text-xs text-red-400 mt-1">
+                              {t("rejectionNote")}: {req.rejectionNote}
+                            </div>
+                          )}
+                        </div>
+                        {req.status === "pending" && (
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              data-ocid="leaverequests.confirm_button"
+                              onClick={() => {
+                                const res = approveLeaveRequest(
+                                  req.id,
+                                  session.id,
+                                );
+                                if (res.ok) {
+                                  toast.success(t("correctionApproved"));
+                                  loadData();
+                                }
+                              }}
+                              className="flex items-center gap-1 bg-green-600 hover:bg-green-700 text-white text-xs font-medium px-3 py-2 rounded-lg transition-colors"
+                            >
+                              <Check size={12} /> {t("approveRequest")}
+                            </button>
+                            {rejectingLeaveId === req.id ? (
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="text"
+                                  value={leaveRejectionNote}
+                                  onChange={(e) =>
+                                    setLeaveRejectionNote(e.target.value)
+                                  }
+                                  placeholder={t("rejectionNote")}
+                                  className="bg-background border border-border rounded-lg px-2 py-1 text-xs w-32 focus:outline-none"
+                                />
+                                <button
+                                  type="button"
+                                  data-ocid="leaverequests.delete_button"
+                                  onClick={() => {
+                                    const res = rejectLeaveRequest(
+                                      req.id,
+                                      session.id,
+                                      leaveRejectionNote,
+                                    );
+                                    if (res.ok) {
+                                      toast.success(t("correctionRejected"));
+                                      setRejectingLeaveId("");
+                                      setLeaveRejectionNote("");
+                                      loadData();
+                                    }
+                                  }}
+                                  className="bg-red-600 hover:bg-red-700 text-white text-xs font-medium px-3 py-2 rounded-lg transition-colors"
+                                >
+                                  {t("rejectRequest")}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setRejectingLeaveId("");
+                                    setLeaveRejectionNote("");
+                                  }}
+                                  className="text-xs text-muted-foreground hover:text-foreground px-2 py-2 rounded-lg"
+                                >
+                                  {t("cancel")}
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setRejectingLeaveId(req.id)}
+                                className="flex items-center gap-1 border border-red-500/40 text-red-400 hover:bg-red-500/10 text-xs font-medium px-3 py-2 rounded-lg transition-colors"
+                              >
+                                <X size={12} /> {t("rejectRequest")}
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        {tab === "payroll" && company && (
+          <PayrollReport companyId={session.id} company={company} t={t} />
+        )}
+
+        {tab === "auditlog" && (
+          <div>
+            <h2 className="text-xl font-bold mb-6">{t("auditLog")}</h2>
+            <div className="bg-card border border-border rounded-xl p-4 mb-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">
+                  {t("from")}
+                </div>
+                <input
+                  type="date"
+                  value={auditFilterFrom}
+                  onChange={(e) => setAuditFilterFrom(e.target.value)}
+                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">
+                  {t("to")}
+                </div>
+                <input
+                  type="date"
+                  value={auditFilterTo}
+                  onChange={(e) => setAuditFilterTo(e.target.value)}
+                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">
+                  {t("filterAction")}
+                </div>
+                <input
+                  type="text"
+                  value={auditFilterAction}
+                  onChange={(e) => setAuditFilterAction(e.target.value)}
+                  placeholder={t("allActions")}
+                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+            {(() => {
+              const filtered = auditEntries.filter((e) => {
+                if (
+                  auditFilterFrom &&
+                  new Date(e.timestamp).toISOString().split("T")[0] <
+                    auditFilterFrom
+                )
+                  return false;
+                if (
+                  auditFilterTo &&
+                  new Date(e.timestamp).toISOString().split("T")[0] >
+                    auditFilterTo
+                )
+                  return false;
+                if (
+                  auditFilterAction &&
+                  !e.action
+                    .toLowerCase()
+                    .includes(auditFilterAction.toLowerCase()) &&
+                  !e.details
+                    .toLowerCase()
+                    .includes(auditFilterAction.toLowerCase())
+                )
+                  return false;
+                return true;
+              });
+              if (filtered.length === 0)
+                return <EmptyState text={t("noAuditLogs")} />;
+              return (
+                <div className="bg-card border border-border rounded-xl overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border">
+                        <th className="text-left px-4 py-3 text-muted-foreground font-medium">
+                          {t("date")}
+                        </th>
+                        <th className="text-left px-4 py-3 text-muted-foreground font-medium">
+                          {t("auditActor")}
+                        </th>
+                        <th className="text-left px-4 py-3 text-muted-foreground font-medium">
+                          {t("auditAction")}
+                        </th>
+                        <th className="text-left px-4 py-3 text-muted-foreground font-medium">
+                          {t("auditDetails")}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.map((entry, idx) => (
+                        <tr
+                          key={entry.id}
+                          data-ocid={`auditlog.item.${idx + 1}`}
+                          className="border-b border-border last:border-0 hover:bg-muted/50 transition-colors"
+                        >
+                          <td className="px-4 py-3 text-muted-foreground text-xs font-mono whitespace-nowrap">
+                            {formatDate(entry.timestamp)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="font-medium text-sm">
+                              {entry.actorName}
+                            </span>
+                            <span
+                              className={`ml-2 text-xs px-1.5 py-0.5 rounded ${entry.actorType === "company" ? "bg-blue-500/20 text-blue-400" : "bg-green-500/20 text-green-400"}`}
+                            >
+                              {entry.actorType}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground font-mono">
+                              {entry.action}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-muted-foreground">
+                            {entry.details}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        {tab === "alerts" && company && (
+          <div>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold">{t("alertsPanel")}</h2>
+            </div>
+            <AlertsPanel companyId={session.id} company={company} t={t} />
+          </div>
+        )}
+
+        {tab === "announcements" && (
+          <div>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold">{t("announcements")}</h2>
+            </div>
+
+            {/* Add announcement form */}
+            <div className="bg-card border border-border rounded-xl p-4 mb-6 max-w-lg">
+              <h3 className="font-semibold text-sm mb-3">
+                {t("addAnnouncement")}
+              </h3>
+              <input
+                type="text"
+                value={newAnnTitle}
+                onChange={(e) => setNewAnnTitle(e.target.value)}
+                placeholder={t("announcementTitle")}
+                data-ocid="announcements.input"
+                className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <textarea
+                value={newAnnContent}
+                onChange={(e) => setNewAnnContent(e.target.value)}
+                placeholder={t("announcementContent")}
+                rows={3}
+                className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              />
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newAnnPinned}
+                    onChange={(e) => setNewAnnPinned(e.target.checked)}
+                    data-ocid="announcements.checkbox"
+                    className="rounded"
+                  />
+                  <Pin size={12} />
+                  {t("pinnedAnnouncement")}
+                </label>
+                <button
+                  type="button"
+                  data-ocid="announcements.submit_button"
+                  disabled={savingAnn || !newAnnTitle.trim()}
+                  onClick={() => {
+                    if (!newAnnTitle.trim()) return;
+                    setSavingAnn(true);
+                    const res = addAnnouncement(
+                      session.id,
+                      newAnnTitle,
+                      newAnnContent,
+                      newAnnPinned,
+                    );
+                    if (res.ok) {
+                      toast.success(t("announcementAdded"));
+                      setNewAnnTitle("");
+                      setNewAnnContent("");
+                      setNewAnnPinned(false);
+                      loadData();
+                    } else {
+                      toast.error(res.message);
+                    }
+                    setSavingAnn(false);
+                  }}
+                  className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm px-4 py-2 rounded-lg transition-colors"
+                >
+                  {t("addAnnouncement")}
+                </button>
+              </div>
+            </div>
+
+            {/* Announcement list */}
+            {announcements.length === 0 ? (
+              <div
+                data-ocid="announcements.empty_state"
+                className="text-center py-10 text-muted-foreground"
+              >
+                <div className="text-3xl mb-2">📢</div>
+                <div>{t("noAnnouncements")}</div>
+              </div>
+            ) : (
+              <div className="space-y-3 max-w-lg">
+                {announcements.map((ann, idx) => (
+                  <div
+                    key={ann.id}
+                    data-ocid={`announcements.item.${idx + 1}`}
+                    className={`bg-card border rounded-xl p-4 ${ann.pinned ? "border-blue-500/40" : "border-border"}`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          {ann.pinned && (
+                            <Pin
+                              size={12}
+                              className="text-blue-400 flex-shrink-0"
+                            />
+                          )}
+                          <span className="font-semibold text-sm">
+                            {ann.title}
+                          </span>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          {ann.content}
+                        </p>
+                        <div className="text-xs text-muted-foreground/60 mt-1">
+                          {new Date(ann.createdAt).toLocaleDateString()}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        data-ocid={`announcements.delete_button.${idx + 1}`}
+                        onClick={() => {
+                          deleteAnnouncement(ann.id, session.id);
+                          loadData();
+                        }}
+                        className="p-1.5 hover:bg-red-500/10 text-red-400 rounded-lg transition-colors flex-shrink-0"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {tab === "settings" && (
           <div>
             <h2 className="text-xl font-bold mb-6">{t("settings")}</h2>
@@ -2240,6 +3154,67 @@ export default function CompanyDashboard({
                 {t("addHoliday")}
               </button>
 
+              {/* Auto Checkout */}
+              <div className="text-base font-semibold mb-4 mt-2 flex items-center gap-2">
+                <ScrollText size={16} />
+                {t("autoCheckout")}
+              </div>
+              <div className="space-y-4 mb-8">
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    data-ocid="settings.toggle"
+                    onClick={() => setAutoCheckoutEnabled(!autoCheckoutEnabled)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${autoCheckoutEnabled ? "bg-blue-600" : "bg-gray-600"}`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${autoCheckoutEnabled ? "translate-x-6" : "translate-x-1"}`}
+                    />
+                  </button>
+                  <span className="text-sm">{t("autoCheckoutEnabled")}</span>
+                </div>
+                {autoCheckoutEnabled && (
+                  <div>
+                    <div className="text-xs text-muted-foreground mb-2">
+                      {t("autoCheckoutMode")}
+                    </div>
+                    <div className="flex gap-3">
+                      <label className="flex items-center gap-2 text-sm cursor-pointer">
+                        <input
+                          type="radio"
+                          name="autoCheckoutMode"
+                          value="flag"
+                          checked={autoCheckoutMode === "flag"}
+                          onChange={() => setAutoCheckoutMode("flag")}
+                          className="accent-blue-500"
+                        />
+                        {t("autoCheckoutFlag")}
+                      </label>
+                      <label className="flex items-center gap-2 text-sm cursor-pointer">
+                        <input
+                          type="radio"
+                          name="autoCheckoutMode"
+                          value="auto"
+                          checked={autoCheckoutMode === "auto"}
+                          onChange={() => setAutoCheckoutMode("auto")}
+                          className="accent-blue-500"
+                        />
+                        {t("autoCheckoutAuto")}
+                      </label>
+                    </div>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  data-ocid="settings.save_button"
+                  onClick={handleSaveAutoCheckout}
+                  disabled={savingAutoCheckout}
+                  className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
+                >
+                  {savingAutoCheckout ? t("loading") : t("save")}
+                </button>
+              </div>
+
               {/* Data Backup & Restore */}
               <div className="text-base font-semibold mb-4 mt-2">
                 {t("dataBackup")}
@@ -2274,6 +3249,17 @@ export default function CompanyDashboard({
           </div>
         )}
       </main>
+
+      {kioskMode && company && (
+        <KioskMode
+          company={company}
+          t={t}
+          onExit={() => {
+            setKioskMode(false);
+            loadData();
+          }}
+        />
+      )}
 
       {showCreateInvite && (
         <dialog

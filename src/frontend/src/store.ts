@@ -18,6 +18,7 @@ export interface Company {
   workDays?: number[]; // 0=Sun,1=Mon...6=Sat, default [1,2,3,4,5]
   shifts?: Shift[]; // named shifts
   minDailyHours?: number; // minimum required daily work hours (0 = disabled)
+  autoCheckout?: { enabled: boolean; mode: "auto" | "flag" };
 }
 
 export interface Employee {
@@ -801,6 +802,7 @@ export function addLeaveRecord(
   const records = load<LeaveRecord>(KEYS.leaveRecords);
   records.push(record);
   save(KEYS.leaveRecords, records);
+  incrementLeaveUsed(companyId, employeeId);
   return { ok: true, message: "Leave record added" };
 }
 
@@ -1086,4 +1088,417 @@ export function getInviteCodeStatus(
   if (invite.maxUses !== undefined && invite.usedCount >= invite.maxUses)
     return "limit";
   return "active";
+}
+
+// ===== BREAK RECORDS =====
+
+export interface BreakRecord {
+  id: string;
+  employeeId: string;
+  companyId: string;
+  attendanceRecordId: string;
+  startTime: number;
+  endTime?: number;
+}
+
+const BREAK_KEY = "sf_breaks";
+const LEAVE_REQ_KEY = "sf_leave_requests";
+
+export function startBreak(
+  employeeId: string,
+  companyId: string,
+): { ok: boolean; breakId: string; message: string } {
+  const status = getLastAttendanceStatus(employeeId, companyId);
+  if (!status.isCheckedIn)
+    return { ok: false, breakId: "", message: "Not checked in" };
+
+  const breaks = load<BreakRecord>(BREAK_KEY);
+  const activeBreak = breaks.find(
+    (b) =>
+      b.employeeId === employeeId && b.companyId === companyId && !b.endTime,
+  );
+  if (activeBreak)
+    return { ok: false, breakId: "", message: "Already on break" };
+
+  const id = nextId();
+  const record: BreakRecord = {
+    id,
+    employeeId,
+    companyId,
+    attendanceRecordId: "",
+    startTime: Date.now(),
+  };
+  breaks.push(record);
+  save(BREAK_KEY, breaks);
+  return { ok: true, breakId: id, message: "Break started" };
+}
+
+export function endBreak(
+  employeeId: string,
+  companyId: string,
+): { ok: boolean; message: string } {
+  const breaks = load<BreakRecord>(BREAK_KEY);
+  const idx = breaks.findIndex(
+    (b) =>
+      b.employeeId === employeeId && b.companyId === companyId && !b.endTime,
+  );
+  if (idx === -1) return { ok: false, message: "No active break" };
+  breaks[idx].endTime = Date.now();
+  save(BREAK_KEY, breaks);
+  return { ok: true, message: "Break ended" };
+}
+
+export function getActiveBreak(
+  employeeId: string,
+  companyId: string,
+): BreakRecord | undefined {
+  return load<BreakRecord>(BREAK_KEY).find(
+    (b) =>
+      b.employeeId === employeeId && b.companyId === companyId && !b.endTime,
+  );
+}
+
+export function getTotalBreakMinutes(
+  employeeId: string,
+  companyId: string,
+  checkinTimestamp: number,
+  checkoutTimestamp: number,
+): number {
+  const breaks = load<BreakRecord>(BREAK_KEY).filter(
+    (b) =>
+      b.employeeId === employeeId &&
+      b.companyId === companyId &&
+      b.startTime >= checkinTimestamp &&
+      b.startTime <= checkoutTimestamp &&
+      b.endTime !== undefined,
+  );
+  return breaks.reduce((sum, b) => {
+    return sum + Math.floor(((b.endTime ?? 0) - b.startTime) / 60000);
+  }, 0);
+}
+
+// ===== LEAVE REQUESTS =====
+
+export interface LeaveRequest {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  employeeName: string;
+  date: string;
+  leaveType: "leave" | "sick" | "excuse";
+  reason: string;
+  status: "pending" | "approved" | "rejected";
+  rejectionNote?: string;
+  createdAt: number;
+}
+
+export function addLeaveRequest(
+  companyId: string,
+  employeeId: string,
+  date: string,
+  leaveType: LeaveRequest["leaveType"],
+  reason: string,
+): { ok: boolean; message: string } {
+  if (!date || !reason.trim())
+    return { ok: false, message: "Date and reason required" };
+  const employee = getEmployee(employeeId);
+  if (!employee) return { ok: false, message: "Employee not found" };
+  const id = nextId();
+  const req: LeaveRequest = {
+    id,
+    companyId,
+    employeeId,
+    employeeName: employee.fullName,
+    date,
+    leaveType,
+    reason: reason.trim(),
+    status: "pending",
+    createdAt: Date.now(),
+  };
+  const requests = load<LeaveRequest>(LEAVE_REQ_KEY);
+  requests.push(req);
+  save(LEAVE_REQ_KEY, requests);
+  return { ok: true, message: "Leave request submitted" };
+}
+
+export function getCompanyLeaveRequests(companyId: string): LeaveRequest[] {
+  return load<LeaveRequest>(LEAVE_REQ_KEY)
+    .filter((r) => r.companyId === companyId)
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export function getEmployeeLeaveRequests(
+  employeeId: string,
+  companyId: string,
+): LeaveRequest[] {
+  return load<LeaveRequest>(LEAVE_REQ_KEY)
+    .filter((r) => r.employeeId === employeeId && r.companyId === companyId)
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export function approveLeaveRequest(
+  id: string,
+  companyId: string,
+): { ok: boolean; message: string } {
+  const requests = load<LeaveRequest>(LEAVE_REQ_KEY);
+  const idx = requests.findIndex(
+    (r) => r.id === id && r.companyId === companyId,
+  );
+  if (idx === -1) return { ok: false, message: "Not found" };
+  const req = requests[idx];
+  // Create a leave record
+  addLeaveRecord(
+    companyId,
+    req.employeeId,
+    req.date,
+    req.leaveType,
+    req.reason,
+  );
+  requests[idx].status = "approved";
+  save(LEAVE_REQ_KEY, requests);
+  return { ok: true, message: "Approved" };
+}
+
+export function rejectLeaveRequest(
+  id: string,
+  companyId: string,
+  rejectionNote?: string,
+): { ok: boolean; message: string } {
+  const requests = load<LeaveRequest>(LEAVE_REQ_KEY);
+  const idx = requests.findIndex(
+    (r) => r.id === id && r.companyId === companyId,
+  );
+  if (idx === -1) return { ok: false, message: "Not found" };
+  requests[idx].status = "rejected";
+  requests[idx].rejectionNote = rejectionNote?.trim() || undefined;
+  save(LEAVE_REQ_KEY, requests);
+  return { ok: true, message: "Rejected" };
+}
+
+// ===== AUDIT LOG =====
+
+export interface AuditEntry {
+  id: string;
+  timestamp: number;
+  actorType: "company" | "employee";
+  actorId: string;
+  actorName: string;
+  companyId: string;
+  action: string;
+  details: string;
+}
+
+const AUDIT_KEY = "sf_audit_log";
+
+export function addAuditEntry(entry: Omit<AuditEntry, "id">): void {
+  const entries = load<AuditEntry>(AUDIT_KEY);
+  entries.push({ ...entry, id: nextId() });
+  // Keep last 1000 entries
+  if (entries.length > 1000) entries.splice(0, entries.length - 1000);
+  save(AUDIT_KEY, entries);
+}
+
+export function getCompanyAuditLog(companyId: string): AuditEntry[] {
+  return load<AuditEntry>(AUDIT_KEY)
+    .filter((e) => e.companyId === companyId)
+    .sort((a, b) => b.timestamp - a.timestamp);
+}
+
+// ===== AUTO CHECKOUT =====
+
+export function updateCompanyAutoCheckout(
+  companyId: string,
+  enabled: boolean,
+  mode: "auto" | "flag",
+): { ok: boolean; message: string } {
+  const companies = load<Company>(KEYS.companies);
+  const idx = companies.findIndex((c) => c.id === companyId);
+  if (idx === -1) return { ok: false, message: "Company not found" };
+  companies[idx].autoCheckout = { enabled, mode };
+  save(KEYS.companies, companies);
+  return { ok: true, message: "Auto checkout updated" };
+}
+
+const MISSING_CHECKOUT_KEY = "sf_missing_checkouts";
+
+export interface MissingCheckout {
+  employeeId: string;
+  employeeName: string;
+  companyId: string;
+  date: string;
+  checkinTimestamp: number;
+}
+
+export function addMissingCheckoutFlag(entry: MissingCheckout): void {
+  const records = load<MissingCheckout>(MISSING_CHECKOUT_KEY);
+  const exists = records.some(
+    (r) =>
+      r.employeeId === entry.employeeId &&
+      r.companyId === entry.companyId &&
+      r.date === entry.date,
+  );
+  if (!exists) {
+    records.push(entry);
+    save(MISSING_CHECKOUT_KEY, records);
+  }
+}
+
+export function getMissingCheckouts(companyId: string): MissingCheckout[] {
+  return load<MissingCheckout>(MISSING_CHECKOUT_KEY).filter(
+    (r) => r.companyId === companyId,
+  );
+}
+
+export function clearMissingCheckout(
+  employeeId: string,
+  companyId: string,
+  date: string,
+): void {
+  const records = load<MissingCheckout>(MISSING_CHECKOUT_KEY).filter(
+    (r) =>
+      !(
+        r.employeeId === employeeId &&
+        r.companyId === companyId &&
+        r.date === date
+      ),
+  );
+  save(MISSING_CHECKOUT_KEY, records);
+}
+
+export function addAutoCheckoutRecord(
+  employeeId: string,
+  employeeName: string,
+  companyId: string,
+  checkoutTimestamp: number,
+): void {
+  const records = load<AttendanceRecord>(KEYS.attendance);
+  const id = nextId();
+  records.push({
+    id,
+    employeeId,
+    employeeName,
+    companyId,
+    recordType: "checkout",
+    timestamp: checkoutTimestamp,
+  });
+  save(KEYS.attendance, records);
+}
+
+// ===== LEAVE BALANCE =====
+
+export interface LeaveBalance {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  annualDays: number;
+  usedDays: number;
+}
+
+const LEAVE_BALANCE_KEY = "sf_leave_balances";
+
+export function setLeaveBalance(
+  companyId: string,
+  employeeId: string,
+  annualDays: number,
+): { ok: boolean; message: string } {
+  const balances = load<LeaveBalance>(LEAVE_BALANCE_KEY);
+  const idx = balances.findIndex(
+    (b) => b.companyId === companyId && b.employeeId === employeeId,
+  );
+  if (idx !== -1) {
+    balances[idx].annualDays = annualDays;
+    save(LEAVE_BALANCE_KEY, balances);
+  } else {
+    balances.push({
+      id: nextId(),
+      companyId,
+      employeeId,
+      annualDays,
+      usedDays: 0,
+    });
+    save(LEAVE_BALANCE_KEY, balances);
+  }
+  return { ok: true, message: "Leave balance saved" };
+}
+
+export function getLeaveBalance(
+  companyId: string,
+  employeeId: string,
+): LeaveBalance | undefined {
+  return load<LeaveBalance>(LEAVE_BALANCE_KEY).find(
+    (b) => b.companyId === companyId && b.employeeId === employeeId,
+  );
+}
+
+export function getCompanyLeaveBalances(companyId: string): LeaveBalance[] {
+  return load<LeaveBalance>(LEAVE_BALANCE_KEY).filter(
+    (b) => b.companyId === companyId,
+  );
+}
+
+export function incrementLeaveUsed(
+  companyId: string,
+  employeeId: string,
+): void {
+  const balances = load<LeaveBalance>(LEAVE_BALANCE_KEY);
+  const idx = balances.findIndex(
+    (b) => b.companyId === companyId && b.employeeId === employeeId,
+  );
+  if (idx !== -1) {
+    balances[idx].usedDays += 1;
+    save(LEAVE_BALANCE_KEY, balances);
+  }
+}
+
+// ===== ANNOUNCEMENTS =====
+
+export interface Announcement {
+  id: string;
+  companyId: string;
+  title: string;
+  content: string;
+  createdAt: number;
+  pinned?: boolean;
+}
+
+const ANNOUNCEMENT_KEY = "sf_announcements";
+
+export function addAnnouncement(
+  companyId: string,
+  title: string,
+  content: string,
+  pinned?: boolean,
+): { ok: boolean; message: string } {
+  const announcements = load<Announcement>(ANNOUNCEMENT_KEY);
+  announcements.push({
+    id: nextId(),
+    companyId,
+    title: title.trim(),
+    content: content.trim(),
+    createdAt: Date.now(),
+    pinned: pinned ?? false,
+  });
+  save(ANNOUNCEMENT_KEY, announcements);
+  return { ok: true, message: "Announcement added" };
+}
+
+export function deleteAnnouncement(
+  id: string,
+  companyId: string,
+): { ok: boolean; message: string } {
+  const announcements = load<Announcement>(ANNOUNCEMENT_KEY).filter(
+    (a) => !(a.id === id && a.companyId === companyId),
+  );
+  save(ANNOUNCEMENT_KEY, announcements);
+  return { ok: true, message: "Announcement deleted" };
+}
+
+export function getCompanyAnnouncements(companyId: string): Announcement[] {
+  return load<Announcement>(ANNOUNCEMENT_KEY)
+    .filter((a) => a.companyId === companyId)
+    .sort((a, b) => {
+      if (a.pinned && !b.pinned) return -1;
+      if (!a.pinned && b.pinned) return 1;
+      return b.createdAt - a.createdAt;
+    });
 }
