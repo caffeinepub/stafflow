@@ -1639,3 +1639,331 @@ export function ensureOvertimeLogsForCompany(companyId: string): void {
     }
   }
 }
+
+// ===== LEAVE TYPES =====
+
+export interface LeaveType {
+  id: string;
+  companyId: string;
+  name: string;
+  annualDays: number;
+  color: string;
+  isDefault?: boolean;
+}
+
+const LEAVE_TYPES_KEY = "sf_leave_types";
+const LEAVE_TYPE_BALANCES_KEY = "sf_leave_type_balances";
+
+const DEFAULT_LEAVE_TYPES = [
+  {
+    id: "default_annual",
+    name_tr: "Yıllık İzin",
+    name_en: "Annual Leave",
+    annualDays: 14,
+    color: "#22c55e",
+  },
+  {
+    id: "default_sick",
+    name_tr: "Hastalık İzni",
+    name_en: "Sick Leave",
+    annualDays: 10,
+    color: "#3b82f6",
+  },
+  {
+    id: "default_unpaid",
+    name_tr: "Ücretsiz İzin",
+    name_en: "Unpaid Leave",
+    annualDays: 0,
+    color: "#f97316",
+  },
+  {
+    id: "default_excuse",
+    name_tr: "Mazeret İzni",
+    name_en: "Excuse Leave",
+    annualDays: 3,
+    color: "#a855f7",
+  },
+];
+
+export function getCompanyLeaveTypes(companyId: string): LeaveType[] {
+  const existing = load<LeaveType>(LEAVE_TYPES_KEY).filter(
+    (lt) => lt.companyId === companyId,
+  );
+  if (existing.length > 0) return existing;
+  // Auto-create defaults
+  const all = load<LeaveType>(LEAVE_TYPES_KEY);
+  for (const d of DEFAULT_LEAVE_TYPES) {
+    all.push({
+      id: `${d.id}_${companyId}`,
+      companyId,
+      name: d.name_tr,
+      annualDays: d.annualDays,
+      color: d.color,
+      isDefault: true,
+    });
+  }
+  save(LEAVE_TYPES_KEY, all);
+  return all.filter((lt) => lt.companyId === companyId);
+}
+
+export function addLeaveType(
+  companyId: string,
+  name: string,
+  annualDays: number,
+  color: string,
+): LeaveType {
+  const all = load<LeaveType>(LEAVE_TYPES_KEY);
+  const lt: LeaveType = { id: nextId(), companyId, name, annualDays, color };
+  all.push(lt);
+  save(LEAVE_TYPES_KEY, all);
+  return lt;
+}
+
+export function deleteLeaveType(id: string): void {
+  const all = load<LeaveType>(LEAVE_TYPES_KEY).filter((lt) => lt.id !== id);
+  save(LEAVE_TYPES_KEY, all);
+}
+
+export interface LeaveTypeBalance {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  leaveTypeId: string;
+  used: number;
+  total: number;
+}
+
+export function getLeaveTypeBalance(
+  employeeId: string,
+  leaveTypeId: string,
+): LeaveTypeBalance | undefined {
+  return load<LeaveTypeBalance>(LEAVE_TYPE_BALANCES_KEY).find(
+    (b) => b.employeeId === employeeId && b.leaveTypeId === leaveTypeId,
+  );
+}
+
+export function getEmployeeLeaveTypeBalances(
+  employeeId: string,
+  companyId: string,
+): LeaveTypeBalance[] {
+  const leaveTypes = getCompanyLeaveTypes(companyId);
+  const existing = load<LeaveTypeBalance>(LEAVE_TYPE_BALANCES_KEY).filter(
+    (b) => b.employeeId === employeeId && b.companyId === companyId,
+  );
+  // Ensure all leave types have a balance record
+  const all = load<LeaveTypeBalance>(LEAVE_TYPE_BALANCES_KEY);
+  let changed = false;
+  for (const lt of leaveTypes) {
+    if (!existing.find((b) => b.leaveTypeId === lt.id)) {
+      const nb: LeaveTypeBalance = {
+        id: nextId(),
+        companyId,
+        employeeId,
+        leaveTypeId: lt.id,
+        used: 0,
+        total: lt.annualDays,
+      };
+      all.push(nb);
+      existing.push(nb);
+      changed = true;
+    }
+  }
+  if (changed) save(LEAVE_TYPE_BALANCES_KEY, all);
+  return existing;
+}
+
+export function deductLeaveTypeBalance(
+  employeeId: string,
+  companyId: string,
+  leaveTypeId: string,
+  days: number,
+): void {
+  const all = load<LeaveTypeBalance>(LEAVE_TYPE_BALANCES_KEY);
+  const idx = all.findIndex(
+    (b) => b.employeeId === employeeId && b.leaveTypeId === leaveTypeId,
+  );
+  if (idx !== -1) {
+    all[idx].used += days;
+    save(LEAVE_TYPE_BALANCES_KEY, all);
+  } else {
+    const lt = load<LeaveType>(LEAVE_TYPES_KEY).find(
+      (l) => l.id === leaveTypeId,
+    );
+    all.push({
+      id: nextId(),
+      companyId,
+      employeeId,
+      leaveTypeId,
+      used: days,
+      total: lt?.annualDays ?? 0,
+    });
+    save(LEAVE_TYPE_BALANCES_KEY, all);
+  }
+}
+
+// ===== SHIFT SWAPS =====
+
+export interface ShiftSwap {
+  id: string;
+  companyId: string;
+  requesterId: string;
+  requesterName: string;
+  requesterShiftId: string;
+  targetId: string;
+  targetName: string;
+  targetShiftId: string;
+  date: string;
+  status: "pending" | "approved" | "rejected";
+  createdAt: number;
+  note?: string;
+}
+
+const SHIFT_SWAP_KEY = "sf_shift_swaps";
+
+export function addShiftSwap(
+  swap: Omit<ShiftSwap, "id" | "createdAt" | "status">,
+): { ok: boolean; message: string } {
+  const swaps = load<ShiftSwap>(SHIFT_SWAP_KEY);
+  swaps.push({
+    ...swap,
+    id: nextId(),
+    status: "pending",
+    createdAt: Date.now(),
+  });
+  save(SHIFT_SWAP_KEY, swaps);
+  return { ok: true, message: "Swap request created" };
+}
+
+export function getCompanyShiftSwaps(companyId: string): ShiftSwap[] {
+  return load<ShiftSwap>(SHIFT_SWAP_KEY)
+    .filter((s) => s.companyId === companyId)
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export function getEmployeeShiftSwaps(employeeId: string): ShiftSwap[] {
+  return load<ShiftSwap>(SHIFT_SWAP_KEY)
+    .filter((s) => s.requesterId === employeeId || s.targetId === employeeId)
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export function approveShiftSwap(
+  id: string,
+  companyId: string,
+): { ok: boolean; message: string } {
+  const swaps = load<ShiftSwap>(SHIFT_SWAP_KEY);
+  const idx = swaps.findIndex((s) => s.id === id);
+  if (idx === -1) return { ok: false, message: "Not found" };
+  const swap = swaps[idx];
+  swaps[idx].status = "approved";
+  save(SHIFT_SWAP_KEY, swaps);
+  // Swap schedule entries
+  const year = Number.parseInt(swap.date.split("-")[0]);
+  const month = Number.parseInt(swap.date.split("-")[1]);
+  const day = Number.parseInt(swap.date.split("-")[2]);
+  const key = `sf_schedule_${companyId}`;
+  const schedules = load<WorkSchedule>(key);
+  const reqIdx = schedules.findIndex(
+    (s) =>
+      s.year === year &&
+      s.month === month &&
+      s.day === day &&
+      s.employeeId === swap.requesterId,
+  );
+  const tgtIdx = schedules.findIndex(
+    (s) =>
+      s.year === year &&
+      s.month === month &&
+      s.day === day &&
+      s.employeeId === swap.targetId,
+  );
+  const reqShift =
+    reqIdx !== -1 ? schedules[reqIdx].shiftId : swap.requesterShiftId;
+  const tgtShift =
+    tgtIdx !== -1 ? schedules[tgtIdx].shiftId : swap.targetShiftId;
+  if (reqIdx !== -1) schedules[reqIdx].shiftId = tgtShift;
+  if (tgtIdx !== -1) schedules[tgtIdx].shiftId = reqShift;
+  save(key, schedules);
+  return { ok: true, message: "Swap approved" };
+}
+
+export function rejectShiftSwap(id: string): { ok: boolean; message: string } {
+  const swaps = load<ShiftSwap>(SHIFT_SWAP_KEY);
+  const idx = swaps.findIndex((s) => s.id === id);
+  if (idx === -1) return { ok: false, message: "Not found" };
+  swaps[idx].status = "rejected";
+  save(SHIFT_SWAP_KEY, swaps);
+  return { ok: true, message: "Swap rejected" };
+}
+
+// ===== ATTENDANCE SCORE =====
+
+export interface AttendanceScore {
+  score: number;
+  absences: number;
+  lateCheckins: number;
+  earlyCheckouts: number;
+  fullDays: number;
+}
+
+export function getAttendanceScore(
+  employeeId: string,
+  companyId: string,
+): AttendanceScore {
+  const company = load<Company>(KEYS.companies).find((c) => c.id === companyId);
+  const workStart = company?.workHours?.start || "09:00";
+  const workEnd = company?.workHours?.end || "18:00";
+
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const records = load<AttendanceRecord>(KEYS.attendance).filter(
+    (r) =>
+      r.employeeId === employeeId &&
+      r.companyId === companyId &&
+      r.timestamp >= thirtyDaysAgo,
+  );
+
+  // Get checkout records for full day calculation
+  const checkouts = records.filter((r) => r.recordType === "checkout");
+  const checkins = records.filter((r) => r.recordType === "checkin");
+
+  let lateCheckins = 0;
+  let earlyCheckouts = 0;
+  let fullDays = 0;
+
+  for (const c of checkins) {
+    if (isLateCheckin(c.timestamp, workStart)) lateCheckins++;
+  }
+  for (const c of checkouts) {
+    if (isEarlyCheckout(c.timestamp, workEnd)) earlyCheckouts++;
+    else fullDays++;
+  }
+
+  // Absences: work days in last 30 days without checkin
+  const today = new Date();
+  const workDays = company?.workDays ?? [1, 2, 3, 4, 5];
+  const checkinDates = new Set(
+    checkins.map((c) => new Date(c.timestamp).toISOString().split("T")[0]),
+  );
+  let absences = 0;
+  for (let i = 1; i <= 30; i++) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    if (d > today) continue;
+    if (
+      workDays.includes(d.getDay()) &&
+      !checkinDates.has(d.toISOString().split("T")[0])
+    ) {
+      absences++;
+    }
+  }
+  // Cap absences: don't count days before employment
+  absences = Math.min(absences, 30);
+
+  let score = 100;
+  score -= absences * 5;
+  score -= lateCheckins * 2;
+  score -= earlyCheckouts * 2;
+  score += Math.min(fullDays, 10);
+  score = Math.max(0, Math.min(100, score));
+
+  return { score, absences, lateCheckins, earlyCheckouts, fullDays };
+}

@@ -54,6 +54,7 @@ import { LANGUAGES, type Lang } from "../i18n";
 import {
   type Announcement,
   type AttendanceRecord,
+  type AttendanceScore,
   type AuditEntry,
   type CorrectionRequest,
   type Employee,
@@ -61,31 +62,38 @@ import {
   type LeaveBalance,
   type LeaveRecord,
   type LeaveRequest,
+  type LeaveType,
   type MissingCheckout,
   type MonthlySummaryRow,
   type OvertimeLog,
   type PublicHoliday,
   type Shift,
+  type ShiftSwap,
   type WorkSchedule,
   addAnnouncement,
   addAuditEntry,
   addAutoCheckoutRecord,
   addLeaveRecord,
+  addLeaveType,
   addMissingCheckoutFlag,
   addPublicHoliday,
+  addShiftSwap,
   approveCorrectionRequest,
   approveLeaveRequest,
+  approveShiftSwap,
   assignEmployeeShift,
   cancelInviteCode,
   clearEmployeePersonalWorkHours,
   createInviteCode,
   deleteAnnouncement,
   deleteLeaveRecord,
+  deleteLeaveType,
   deletePublicHoliday,
   ensureOvertimeLogsForCompany,
   exportAllData,
   formatDuration,
   getAllCompanyAttendance,
+  getAttendanceScore,
   getCheckedInEmployees,
   getCompany,
   getCompanyAnnouncements,
@@ -99,7 +107,9 @@ import {
   getCompanyLeaveBalances,
   getCompanyLeaveRecords,
   getCompanyLeaveRequests,
+  getCompanyLeaveTypes,
   getCompanyOvertimeLogs,
+  getCompanyShiftSwaps,
   getDailyCheckinCount,
   getInviteCodeStatus,
   getLeaveBalance,
@@ -114,6 +124,7 @@ import {
   isLateCheckin,
   rejectCorrectionRequest,
   rejectLeaveRequest,
+  rejectShiftSwap,
   setLeaveBalance,
   setScheduleEntry,
   toggleEmployeeActive,
@@ -159,6 +170,7 @@ type Tab =
   | "announcements"
   | "schedule"
   | "overtimeapprovals"
+  | "shiftswap"
   | "settings";
 
 function formatDate(ts: number) {
@@ -354,6 +366,21 @@ export default function CompanyDashboard({
     "pending",
   );
 
+  // Leave types state
+  const [leaveTypes, setLeaveTypes] = React.useState<LeaveType[]>([]);
+  const [newLeaveTypeName, setNewLeaveTypeName] = React.useState("");
+  const [newLeaveTypeDays, setNewLeaveTypeDays] = React.useState("14");
+  const [newLeaveTypeColor, setNewLeaveTypeColor] = React.useState("#22c55e");
+
+  // Shift swaps state
+  const [shiftSwaps, setShiftSwaps] = React.useState<ShiftSwap[]>([]);
+  const [swapFilter, setSwapFilter] = React.useState<"pending" | "all">(
+    "pending",
+  );
+
+  // Employee filter for risk
+  const [empFilter, setEmpFilter] = React.useState<"all" | "risk">("all");
+
   const loadData = useCallback(() => {
     setInviteCodes(getCompanyInviteCodes(session.id));
     setEmployees(getCompanyEmployees(session.id));
@@ -374,6 +401,8 @@ export default function CompanyDashboard({
     setAnnouncements(getCompanyAnnouncements(session.id));
     setLeaveBalances(getCompanyLeaveBalances(session.id));
     setOvertimeLogs(getCompanyOvertimeLogs(session.id));
+    setLeaveTypes(getCompanyLeaveTypes(session.id));
+    setShiftSwaps(getCompanyShiftSwaps(session.id));
   }, [session.id]);
 
   const loadAttendance = useCallback(() => {
@@ -1002,6 +1031,7 @@ export default function CompanyDashboard({
       icon: <Clock size={16} />,
     },
     { key: "settings", label: t("settings"), icon: <Settings size={16} /> },
+    { key: "shiftswap", label: t("shiftSwap"), icon: <Users size={16} /> },
   ];
 
   return (
@@ -1346,6 +1376,20 @@ export default function CompanyDashboard({
                 {showInactive ? <EyeOff size={14} /> : <Users size={14} />}
                 {showInactive ? t("hideInactive") : t("showInactive")}
               </button>
+              <button
+                type="button"
+                onClick={() => setEmpFilter("all")}
+                className={`flex items-center gap-2 text-sm border px-3 py-2 rounded-xl hover:bg-muted transition-colors ${empFilter === "all" ? "border-blue-500 text-blue-400 bg-blue-500/10" : "border-border text-muted-foreground"}`}
+              >
+                {t("allEmployees")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setEmpFilter("risk")}
+                className={`flex items-center gap-2 text-sm border px-3 py-2 rounded-xl hover:bg-muted transition-colors ${empFilter === "risk" ? "border-red-500 text-red-400 bg-red-500/10" : "border-border text-muted-foreground"}`}
+              >
+                {t("riskPersonnel")}
+              </button>
             </div>
             {selectedEmployees.size > 0 && (
               <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-3 mb-4 flex flex-wrap items-center gap-3">
@@ -1477,11 +1521,15 @@ export default function CompanyDashboard({
             ) : (
               <div className="space-y-2">
                 {employees
-                  .filter((emp) =>
-                    showInactive
+                  .filter((emp) => {
+                    const activeOk = showInactive
                       ? true
-                      : emp.activeInCompanies?.[session.id] !== false,
-                  )
+                      : emp.activeInCompanies?.[session.id] !== false;
+                    if (!activeOk) return false;
+                    if (empFilter === "risk")
+                      return getAttendanceScore(emp.id, session.id).score < 60;
+                    return true;
+                  })
                   .map((emp, idx) => {
                     const isActive =
                       emp.activeInCompanies?.[session.id] !== false;
@@ -3066,6 +3114,167 @@ export default function CompanyDashboard({
           />
         )}
 
+        {tab === "shiftswap" && (
+          <div>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold">{t("shiftSwap")}</h2>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSwapFilter("pending")}
+                  className={`text-sm px-3 py-1.5 rounded-lg border transition-colors ${swapFilter === "pending" ? "bg-blue-500/20 border-blue-500/40 text-blue-400" : "border-border text-muted-foreground hover:bg-muted"}`}
+                >
+                  {t("pending")} (
+                  {shiftSwaps.filter((s) => s.status === "pending").length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSwapFilter("all")}
+                  className={`text-sm px-3 py-1.5 rounded-lg border transition-colors ${swapFilter === "all" ? "bg-blue-500/20 border-blue-500/40 text-blue-400" : "border-border text-muted-foreground hover:bg-muted"}`}
+                >
+                  {t("allEmployees")}
+                </button>
+              </div>
+            </div>
+            {(() => {
+              const filtered =
+                swapFilter === "pending"
+                  ? shiftSwaps.filter((s) => s.status === "pending")
+                  : shiftSwaps;
+              if (filtered.length === 0)
+                return (
+                  <div
+                    data-ocid="shiftswap.empty_state"
+                    className="text-center py-16 text-muted-foreground"
+                  >
+                    <div className="text-4xl mb-3">🔄</div>
+                    <div>{t("noRecords")}</div>
+                  </div>
+                );
+              return (
+                <div className="space-y-3">
+                  {filtered.map((swap) => {
+                    const requesterShift = (company?.shifts || []).find(
+                      (s) => s.id === swap.requesterShiftId,
+                    );
+                    const targetShift = (company?.shifts || []).find(
+                      (s) => s.id === swap.targetShiftId,
+                    );
+                    return (
+                      <div
+                        key={swap.id}
+                        data-ocid="shiftswap.row"
+                        className="bg-card border border-border rounded-xl p-4"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                              <span className="font-medium text-sm">
+                                {swap.requesterName}
+                              </span>
+                              <span className="text-xs text-muted-foreground mx-1">
+                                ↔
+                              </span>
+                              <span className="font-medium text-sm">
+                                {swap.targetName}
+                              </span>
+                              <span
+                                className={`text-xs px-2 py-0.5 rounded-full font-medium ${swap.status === "pending" ? "bg-orange-500/20 text-orange-400" : swap.status === "approved" ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}
+                              >
+                                {t(
+                                  swap.status === "pending"
+                                    ? "swapPending"
+                                    : swap.status === "approved"
+                                      ? "swapApproved"
+                                      : "swapRejected",
+                                )}
+                              </span>
+                            </div>
+                            <div className="text-sm text-muted-foreground font-mono">
+                              {swap.date}
+                            </div>
+                            <div className="text-xs text-muted-foreground mt-1">
+                              {swap.requesterName}:{" "}
+                              <span className="text-foreground">
+                                {requesterShift?.name ||
+                                  swap.requesterShiftId ||
+                                  "—"}
+                              </span>
+                              {" ↔ "}
+                              {swap.targetName}:{" "}
+                              <span className="text-foreground">
+                                {targetShift?.name || swap.targetShiftId || "—"}
+                              </span>
+                            </div>
+                            {swap.note && (
+                              <div className="text-xs text-muted-foreground mt-1 italic">
+                                {swap.note}
+                              </div>
+                            )}
+                          </div>
+                          {swap.status === "pending" && (
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                data-ocid="shiftswap.confirm_button"
+                                onClick={() => {
+                                  const res = approveShiftSwap(
+                                    swap.id,
+                                    session.id,
+                                  );
+                                  if (res.ok) {
+                                    addAuditEntry({
+                                      companyId: session.id,
+                                      action: "shift_swap_approved",
+                                      details: `Shift swap approved: ${swap.requesterName} ↔ ${swap.targetName} on ${swap.date}`,
+                                      timestamp: Date.now(),
+                                      actorType: "company",
+                                      actorId: session.id,
+                                      actorName: "admin",
+                                    });
+                                    toast.success(t("swapApproveOk"));
+                                    loadData();
+                                  }
+                                }}
+                                className="flex items-center gap-1 bg-green-600 hover:bg-green-700 text-white text-xs font-medium px-3 py-2 rounded-lg transition-colors"
+                              >
+                                <Check size={12} /> {t("approve")}
+                              </button>
+                              <button
+                                type="button"
+                                data-ocid="shiftswap.delete_button"
+                                onClick={() => {
+                                  const res = rejectShiftSwap(swap.id);
+                                  if (res.ok) {
+                                    addAuditEntry({
+                                      companyId: session.id,
+                                      action: "shift_swap_rejected",
+                                      details: `Shift swap rejected: ${swap.requesterName} ↔ ${swap.targetName} on ${swap.date}`,
+                                      timestamp: Date.now(),
+                                      actorType: "company",
+                                      actorId: session.id,
+                                      actorName: "admin",
+                                    });
+                                    toast.success(t("swapRejectOk"));
+                                    loadData();
+                                  }
+                                }}
+                                className="flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white text-xs font-medium px-3 py-2 rounded-lg transition-colors"
+                              >
+                                <X size={12} /> {t("reject")}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
         {tab === "settings" && (
           <div>
             <h2 className="text-xl font-bold mb-6">{t("settings")}</h2>
@@ -3304,6 +3513,96 @@ export default function CompanyDashboard({
               >
                 <Plus size={16} />
                 {t("addHoliday")}
+              </button>
+
+              {/* Leave Type Management */}
+              <div className="text-base font-semibold mb-4 mt-8 flex items-center gap-2">
+                <CalendarDays size={16} />
+                {t("leaveTypeSettings")}
+              </div>
+              {leaveTypes.length > 0 && (
+                <div className="space-y-2 mb-4">
+                  {leaveTypes.map((lt) => (
+                    <div
+                      key={lt.id}
+                      className="flex items-center justify-between bg-muted/40 border border-border rounded-xl px-4 py-3"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span
+                          className="w-3 h-3 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: lt.color }}
+                        />
+                        <span className="font-medium text-sm">{lt.name}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {lt.annualDays > 0
+                            ? `${lt.annualDays} gün`
+                            : "Sınırsız"}
+                        </span>
+                      </div>
+                      {!lt.isDefault && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            deleteLeaveType(lt.id);
+                            loadData();
+                            toast.success(t("leaveTypeDeleted"));
+                          }}
+                          className="p-1.5 hover:bg-red-500/10 text-red-400 rounded-lg transition-colors"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="grid grid-cols-1 gap-3 mb-3">
+                <input
+                  type="text"
+                  value={newLeaveTypeName}
+                  onChange={(e) => setNewLeaveTypeName(e.target.value)}
+                  placeholder={t("leaveTypeName")}
+                  className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <div className="grid grid-cols-2 gap-3">
+                  <input
+                    type="number"
+                    min="0"
+                    max="365"
+                    value={newLeaveTypeDays}
+                    onChange={(e) => setNewLeaveTypeDays(e.target.value)}
+                    placeholder={t("annualDays")}
+                    className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <input
+                    type="color"
+                    value={newLeaveTypeColor}
+                    onChange={(e) => setNewLeaveTypeColor(e.target.value)}
+                    className="w-full bg-background border border-border rounded-xl px-4 py-2 h-12 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+              <button
+                type="button"
+                data-ocid="settings.primary_button"
+                onClick={() => {
+                  if (!newLeaveTypeName.trim()) return;
+                  addLeaveType(
+                    session.id,
+                    newLeaveTypeName.trim(),
+                    Number.parseInt(newLeaveTypeDays) || 0,
+                    newLeaveTypeColor,
+                  );
+                  setNewLeaveTypeName("");
+                  setNewLeaveTypeDays("14");
+                  setNewLeaveTypeColor("#22c55e");
+                  loadData();
+                  toast.success(t("leaveTypeAdded"));
+                }}
+                className="flex items-center gap-2 w-full justify-center bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl transition-colors mb-8"
+              >
+                <Plus size={16} />
+                {t("addLeaveType")}
               </button>
 
               {/* Auto Checkout */}

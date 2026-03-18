@@ -1,32 +1,53 @@
 # StafFlow
 
 ## Current State
-Sürüm 10 aktif. Vardiya tanımlama ve atama mevcut ama takvim bazlı program planlama yok. Fazla mesai otomatik hesaplanıyor ama onay akışı yok. İzin/düzeltme taleplerinde belge eki desteği yok.
 
-Mevcut sekmeler: overview, live, invites, employees, attendance, summary, statistics, corrections, leaverequests, payroll, alerts, auditlog, announcements, settings.
-
-Veriler localStorage'da, store.ts ile yönetiliyor.
+Sürüm 11 aktif. Mevcut özellikler: devam takibi, mola, vardiya, program planlama, izin yönetimi (tek havuz), izin bakiyesi, fazla mesai onayı, denetim kaydı, otomatik çıkış, kiosk modu, çoklu şirket görünümü, duyuru sistemi, eşik uyarıları, bordro özet raporu, toplu işlemler, istatistik sekmesi, belge ekleri.
 
 ## Requested Changes (Diff)
 
 ### Add
-1. **Program Planlama (schedule) sekmesi** -- Şirket panelinde yeni sekme. Takvim görünümünde (haftalık/aylık) hangi personelin hangi günlerde çalışacağını yönetici planlayabilsin. Her hücreye vardiya atanabilsin. Personel panelinde de kendi programını görüntülesin.
-2. **Fazla Mesai Onayı** -- Fazla mesai otomatik tespit edildiğinde 'overtimelog' listesinde 'pending' durumda kaydedilsin. Şirket panelinde yeni 'overtimeapprovals' sekmesinde yönetici onaylayabilsin/reddedebilsin. Onaylanmamış fazla mesai bordro raporunda farklı işaretlensin.
-3. **Taleplere Belge Eki** -- İzin talebi ve devam düzeltme talebi formlarına dosya yükleme alanı eklensin. Dosya base64 olarak talep kaydına eklenmesi, yönetici onay ekranında görüntülenebilmesi.
+
+1. **İzin türleri yönetimi**
+   - Şirket, Ayarlar sekmesinde izin türleri tanımlayabilir (ad, yıllık gün kotası, renk)
+   - Varsayılan türler: Yıllık İzin, Hastalık İzni, Ücretsiz İzin, Mazeret İzni
+   - Her personelin her izin türü için ayrı bakiyesi tutulur (sf_leave_balances)
+   - İzin talebi oluşturulurken izin türü seçilir
+   - Onaylandığında ilgili türün bakiyesinden düşülür
+   - Özet ve bordro raporlarında izin türüne göre ayrıştırılmış görünüm
+
+2. **Vardiya değişim talebi**
+   - Personel panelinde "Vardiya Değişim Talebi" bölümü
+   - Personel: tarih, kendi vardiyası, karşı personel kodu ve vardiyası ile talep oluşturur
+   - Şirket panelinde Vardiya Değişim Talepleri sekmesi (onay/red)
+   - Onaylandığında program takviminde iki personelin vardiyası swap edilir
+   - Audit log'a eklenir
+
+3. **Devam puanı / performans özeti**
+   - Her personel için otomatik hesaplanan skor (0-100)
+   - Geç geliş, erken çıkış, devamsızlık sayısına göre puan düşülür; tam devam günleri puan ekler
+   - Personeller sekmesinde her satırda renk kodlu skor rozeti (yeşil/sarı/kırmızı)
+   - Yönetici filtresinde "Riskli personeller" seçeneği (skor < 60)
+   - Personel kendi puanını kendi panelinde görebilir
 
 ### Modify
-- store.ts: WorkSchedule tipi (companyId, week/month, employeeId -> shiftId/off), OvertimeLog tipi (recordId, employeeId, companyId, minutes, status: pending|approved|rejected, reviewedAt, reviewedBy), LeaveRequest ve CorrectionRequest tiplerine optional `documentBase64` ve `documentName` alanları eklenmesi.
-- i18n.ts: Yeni özellikler için çeviriler (tr + en zorunlu, diğer 8 dil).
-- CompanyDashboard: 2 yeni sekme (schedule, overtimeapprovals).
-- EmployeeDashboard: Program sekmesi (readonly, kendi programını görmesi).
+
+- İzin talebi formu: izin türü seçimi eklenir
+- İzin bakiyesi gösterimi: türe göre ayrıştırılmış kart
+- Personeller sekmesi: skor rozeti sütunu eklenir
 
 ### Remove
-- Hiçbir şey kaldırılmıyor.
+
+- Hiçbir mevcut özellik kaldırılmıyor
 
 ## Implementation Plan
-1. store.ts'e WorkSchedule, OvertimeLog tipleri ve ilgili CRUD fonksiyonları ekle. LeaveRequest/CorrectionRequest tiplerine documentBase64/documentName ekle.
-2. i18n.ts'e yeni key'ler ekle (schedule, overtimeapprovals, document attachment vb.).
-3. CompanyDashboard'a 'schedule' ve 'overtimeapprovals' sekmeleri ekle.
-4. EmployeeDashboard'a 'schedule' sekmesi (read-only) ekle.
-5. İzin talebi ve düzeltme talebi formlarına dosya yükleme input'u ekle (hem şirket hem personel paneli).
-6. Bordro raporunda onaylanmamış fazla mesaiye farklı badge/renk ekle.
+
+1. localStorage veri yapılarına izin türleri (sf_leave_types), per-person per-type bakiye (sf_leave_balances), vardiya değişim talepleri (sf_shift_swaps) eklenir
+2. İzin türleri için Ayarlar sekmesine CRUD UI eklenir
+3. İzin talebi formu güncellenir (tür seçimi)
+4. Onay akışında tür bakiyesi düşülür
+5. Vardiya değişim talebi formu personel paneline eklenir
+6. Şirket paneline vardiya değişim talepleri onay UI'ı eklenir
+7. Devam puanı hesaplama fonksiyonu yazılır
+8. Personeller tablosuna skor rozeti eklenir, "Riskli" filtresi eklenir
+9. Personel panelinde kendi skoru gösterilir

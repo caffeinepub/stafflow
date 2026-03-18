@@ -25,21 +25,26 @@ import { useQRScanner } from "../qr-code/useQRScanner";
 import {
   type Announcement,
   type AttendanceRecord,
+  type AttendanceScore,
   type Company,
   type CorrectionRequest,
   type Employee,
   type LeaveRequest,
+  type ShiftSwap,
   type WorkSchedule,
   addCorrectionRequest,
   addLeaveRequest,
+  addShiftSwap,
   endBreak,
   getActiveBreak,
+  getAttendanceScore,
   getCompany,
   getCompanyAnnouncements,
   getEmployee,
   getEmployeeAttendance,
   getEmployeeCorrectionRequests,
   getEmployeeLeaveRequests,
+  getEmployeeShiftSwaps,
   getLastAttendanceStatus,
   getLeaveBalance,
   getMonthlyAttendanceSummary,
@@ -69,7 +74,8 @@ type Tab =
   | "qr"
   | "corrections"
   | "leaverequests"
-  | "schedule";
+  | "schedule"
+  | "shiftswap";
 
 function formatDate(ts: number) {
   return new Date(ts).toLocaleString();
@@ -85,6 +91,11 @@ export default function EmployeeDashboard({
   onLogout,
 }: Props) {
   const [tab, setTab] = useState<Tab>("companies");
+  const [myShiftSwaps, setMyShiftSwaps] = useState<ShiftSwap[]>([]);
+  const [swapDate, setSwapDate] = useState("");
+  const [swapTargetCode, setSwapTargetCode] = useState("");
+  const [swapNote, setSwapNote] = useState("");
+  const [submittingSwap, setSubmittingSwap] = useState(false);
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [checkinStatus, setCheckinStatus] = useState<
@@ -371,6 +382,11 @@ export default function EmployeeDashboard({
       label: t("scheduleTab"),
       icon: <CalendarDays size={16} />,
     },
+    {
+      key: "shiftswap",
+      label: t("shiftSwap"),
+      icon: <ClipboardList size={16} />,
+    },
   ];
 
   return (
@@ -455,6 +471,87 @@ export default function EmployeeDashboard({
         {tab === "summary" && (
           <div>
             <h2 className="text-xl font-bold mb-6">{t("consolidatedView")}</h2>
+            {companies.length > 0 &&
+              employee &&
+              (() => {
+                const sc: AttendanceScore = getAttendanceScore(
+                  session.id,
+                  companies[0].id,
+                );
+                const bgColor =
+                  sc.score >= 80
+                    ? "bg-green-500/10 border-green-500/30"
+                    : sc.score >= 60
+                      ? "bg-yellow-500/10 border-yellow-500/30"
+                      : "bg-red-500/10 border-red-500/30";
+                const barColor =
+                  sc.score >= 80
+                    ? "bg-green-500"
+                    : sc.score >= 60
+                      ? "bg-yellow-500"
+                      : "bg-red-500";
+                const textColor =
+                  sc.score >= 80
+                    ? "text-green-400"
+                    : sc.score >= 60
+                      ? "text-yellow-400"
+                      : "text-red-400";
+                return (
+                  <div className={`border rounded-2xl p-5 mb-6 ${bgColor}`}>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="font-semibold">
+                        {t("performanceSummary")}
+                      </div>
+                      <div className={`text-3xl font-bold ${textColor}`}>
+                        {sc.score}
+                      </div>
+                    </div>
+                    <div className="w-full bg-muted rounded-full h-2 mb-3">
+                      <div
+                        className={`h-2 rounded-full ${barColor}`}
+                        style={{ width: `${sc.score}%` }}
+                      />
+                    </div>
+                    <div className="text-xs text-muted-foreground mb-2">
+                      {t("scoreLast30")}
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                      <div className="bg-background/60 rounded-lg p-2 text-center">
+                        <div className={`font-bold ${textColor}`}>
+                          {sc.absences}
+                        </div>
+                        <div className="text-muted-foreground">
+                          {t("scoreAbsences")}
+                        </div>
+                      </div>
+                      <div className="bg-background/60 rounded-lg p-2 text-center">
+                        <div className="font-bold text-orange-400">
+                          {sc.lateCheckins}
+                        </div>
+                        <div className="text-muted-foreground">
+                          {t("scoreLate")}
+                        </div>
+                      </div>
+                      <div className="bg-background/60 rounded-lg p-2 text-center">
+                        <div className="font-bold text-orange-400">
+                          {sc.earlyCheckouts}
+                        </div>
+                        <div className="text-muted-foreground">
+                          {t("scoreEarly")}
+                        </div>
+                      </div>
+                      <div className="bg-background/60 rounded-lg p-2 text-center">
+                        <div className="font-bold text-green-400">
+                          {sc.fullDays}
+                        </div>
+                        <div className="text-muted-foreground">
+                          {t("scoreFullDays")}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             {companies.length === 0 ? (
               <div
                 data-ocid="summary.empty_state"
@@ -1067,6 +1164,165 @@ export default function EmployeeDashboard({
           }}
           t={t}
         />
+      )}
+
+      {tab === "shiftswap" && (
+        <div>
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-bold">{t("shiftSwap")}</h2>
+          </div>
+          <div className="bg-card border border-border rounded-2xl p-5 mb-6">
+            <div className="font-semibold mb-4">{t("shiftSwapRequest")}</div>
+            <div className="space-y-3">
+              <div>
+                <div className="text-sm font-medium mb-1">
+                  {t("selectCompany")}
+                </div>
+                <select
+                  id="swap-company-select"
+                  className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  data-ocid="shiftswap.select"
+                >
+                  <option value="">{t("selectCompany")}</option>
+                  {companies.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <div className="text-sm font-medium mb-1">{t("swapDate")}</div>
+                <input
+                  type="date"
+                  data-ocid="shiftswap.input"
+                  value={swapDate}
+                  onChange={(e) => setSwapDate(e.target.value)}
+                  className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <div className="text-sm font-medium mb-1">
+                  {t("targetPersonnelCode")}
+                </div>
+                <input
+                  type="text"
+                  value={swapTargetCode}
+                  onChange={(e) => setSwapTargetCode(e.target.value)}
+                  placeholder="Personel kodu..."
+                  className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  data-ocid="shiftswap.search_input"
+                />
+              </div>
+              <div>
+                <div className="text-sm font-medium mb-1">{t("swapNote")}</div>
+                <input
+                  type="text"
+                  value={swapNote}
+                  onChange={(e) => setSwapNote(e.target.value)}
+                  placeholder={t("swapNote")}
+                  className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  data-ocid="shiftswap.textarea"
+                />
+              </div>
+              <button
+                type="button"
+                data-ocid="shiftswap.primary_button"
+                disabled={submittingSwap}
+                onClick={async () => {
+                  const companyEl = document.getElementById(
+                    "swap-company-select",
+                  ) as HTMLSelectElement;
+                  const companyId = companyEl?.value;
+                  if (!companyId || !swapDate || !swapTargetCode.trim()) {
+                    toast.error(t("required"));
+                    return;
+                  }
+                  const { loginEmployee: loginEmp } = await import("../store");
+                  const targetResult = loginEmp(swapTargetCode.trim());
+                  if (!targetResult.employee) {
+                    toast.error(t("invalidCode"));
+                    return;
+                  }
+                  const targetEmp = targetResult.employee;
+                  setSubmittingSwap(true);
+                  const myShift = employee?.assignedShifts?.[companyId] || "";
+                  const targetShift =
+                    targetEmp.assignedShifts?.[companyId] || "";
+                  const res = addShiftSwap({
+                    companyId,
+                    requesterId: session.id,
+                    requesterName: employee?.fullName || "",
+                    requesterShiftId: myShift,
+                    targetId: targetEmp.id,
+                    targetName: targetEmp.fullName,
+                    targetShiftId: targetShift,
+                    date: swapDate,
+                    note: swapNote,
+                  });
+                  if (res.ok) {
+                    toast.success(t("swapCreated"));
+                    setSwapDate("");
+                    setSwapTargetCode("");
+                    setSwapNote("");
+                    setMyShiftSwaps(getEmployeeShiftSwaps(session.id));
+                  }
+                  setSubmittingSwap(false);
+                }}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold py-3 rounded-xl transition-colors"
+              >
+                {submittingSwap ? t("loading") : t("requestSwap")}
+              </button>
+            </div>
+          </div>
+          <div className="font-semibold mb-3">{t("swapRequests")}</div>
+          {myShiftSwaps.length === 0 ? (
+            <div
+              data-ocid="shiftswap.empty_state"
+              className="text-center py-12 text-muted-foreground"
+            >
+              <div className="text-3xl mb-2">🔄</div>
+              <div>{t("noRecords")}</div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {myShiftSwaps.map((swap, idx) => (
+                <div
+                  key={swap.id}
+                  data-ocid={`shiftswap.item.${idx + 1}`}
+                  className="bg-card border border-border rounded-xl p-4"
+                >
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <span className="font-medium text-sm">
+                      {swap.requesterId === session.id
+                        ? `${t("swapWith")}: ${swap.targetName}`
+                        : swap.requesterName}
+                    </span>
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded-full font-medium ${swap.status === "pending" ? "bg-orange-500/20 text-orange-400" : swap.status === "approved" ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}
+                    >
+                      {t(
+                        swap.status === "pending"
+                          ? "swapPending"
+                          : swap.status === "approved"
+                            ? "swapApproved"
+                            : "swapRejected",
+                      )}
+                    </span>
+                  </div>
+                  <div className="text-sm text-muted-foreground font-mono">
+                    {swap.date}
+                  </div>
+                  {swap.note && (
+                    <div className="text-xs text-muted-foreground mt-1 italic">
+                      {swap.note}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       {showAddLeaveReq && (
