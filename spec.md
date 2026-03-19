@@ -1,32 +1,33 @@
-# StafFlow — Backend-First Rebuild
+# StafFlow v17 - Tur A Feature Expansion
 
 ## Current State
-The application is a fully-featured localStorage-based prototype (v14) with 10+ languages, attendance tracking, leave management, shift management, and more. All data is stored locally in each browser — there is no shared backend. This makes multi-device, multi-user access impossible.
+v16 contains: company/personnel management, check-in/out, shifts, leave types + requests, attendance corrections, dashboard with department chart. Backend uses Motoko on Internet Computer with centralized storage.
 
 ## Requested Changes (Diff)
 
 ### Add
-- Motoko backend with persistent, shared data storage
-- Company registration: generates unique 16-char entry code, stores company data centrally
-- Personnel registration: generates unique 12-char code, links to a company
-- Check-in / check-out: records stored centrally, visible to all authorized users of that company
-- Role-based access: company admin, personnel (same code-based, passwordless auth)
-- Attendance records: viewable by admin (all personnel) and personnel (own records)
-- Basic dashboard for admin: today's check-ins, personnel list, attendance log
-- Basic dashboard for personnel: own check-in/out, own attendance history
-- Multi-language UI support (TR/EN at minimum for initial version)
-- Dark mode
-- Mobile-responsive layout
+- **Break tracking**: Personnel can start/end breaks; net work time calculated by subtracting break durations
+- **Audit log**: All admin actions (leave approval, correction approval, personnel changes) recorded with timestamp, actor, action type
+- **Announcement system**: Admin posts company-wide announcements; visible in employee dashboard and kiosk
+- **Notification center**: In-app notifications for leave approved/rejected, correction approved/rejected, announcements
+- **Overtime approval workflow**: Overtime auto-calculated; admin can approve/reject; payroll shows approved vs unapproved separately
+- **Monthly payroll/summary report**: Per-person total work hours, overtime, absences, leave days exportable as table
+- **Kiosk mode**: Simplified check-in/out screen for shared tablet -- only personnel code needed (company pre-selected)
+- **Attendance score**: Score per employee based on late arrivals, early departures, absences (0-100 scale with color badges)
 
 ### Modify
-- Replace localStorage with backend canister calls for all data operations
+- AttendanceRecord: add break tracking fields (breakStart, totalBreakMinutes)
+- Personnel: add attendanceScore field
+- CompanyDashboard: add Rapor, Duyurular, Denetim, Kiosk tabs
+- EmployeeDashboard: add Bildirimler, Duyurular sections
 
 ### Remove
-- localStorage as primary data store
+- Nothing removed
 
 ## Implementation Plan
-1. Generate Motoko backend: Company, Personnel, AttendanceRecord types with CRUD operations
-2. Backend exposes: registerCompany, loginCompany, addPersonnel, loginPersonnel, checkIn, checkOut, getAttendanceRecords, getPersonnelList
-3. Frontend: code-based login flow, company admin panel (personnel mgmt + attendance log), personnel panel (check-in/out + own history)
-4. Keep UI clean and mobile-friendly, support TR/EN language toggle
-5. Deploy and verify shared data works across devices
+1. Backend: Add Break, AuditLog, Announcement, Notification, OvertimeApproval data types and CRUD functions
+2. Backend: Add payroll calculation query, attendance score calculation
+3. Backend: Add kiosk check-in function (no principal auth, just personnel code)
+4. Frontend CompanyDashboard: Add Rapor tab (payroll), Duyurular tab, Denetim tab (audit log), Kiosk mode button/view
+5. Frontend CompanyDashboard: Add overtime approvals section in attendance tab
+6. Frontend EmployeeDashboard: Add notifications bell, announcements section, break start/end button, attendance score display

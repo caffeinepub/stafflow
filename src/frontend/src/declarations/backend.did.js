@@ -15,6 +15,7 @@ export const Personnel = IDL.Record({
   'isActive' : IDL.Bool,
   'isAdmin' : IDL.Bool,
   'department' : IDL.Text,
+  'shiftId' : IDL.Opt(IDL.Text),
   'companyId' : IDL.Text,
 });
 export const UserRole = IDL.Variant({
@@ -28,6 +29,56 @@ export const AttendanceRecord = IDL.Record({
   'checkIn' : IDL.Int,
   'personnelId' : IDL.Text,
   'checkOut' : IDL.Int,
+  'companyId' : IDL.Text,
+});
+export const Announcement = IDL.Record({
+  'id' : IDL.Text,
+  'title' : IDL.Text,
+  'content' : IDL.Text,
+  'authorId' : IDL.Text,
+  'createdAt' : IDL.Int,
+  'isActive' : IDL.Bool,
+  'companyId' : IDL.Text,
+});
+export const LeaveType = IDL.Record({
+  'id' : IDL.Text,
+  'annualQuota' : IDL.Nat,
+  'name' : IDL.Text,
+  'companyId' : IDL.Text,
+});
+export const Shift = IDL.Record({
+  'id' : IDL.Text,
+  'startTime' : IDL.Text,
+  'endTime' : IDL.Text,
+  'name' : IDL.Text,
+  'workDays' : IDL.Text,
+  'companyId' : IDL.Text,
+});
+export const BreakRecord = IDL.Record({
+  'id' : IDL.Text,
+  'startTime' : IDL.Int,
+  'endTime' : IDL.Opt(IDL.Int),
+  'isActive' : IDL.Bool,
+  'personnelId' : IDL.Text,
+  'attendanceId' : IDL.Text,
+});
+export const AttendanceCorrectionRequest = IDL.Record({
+  'id' : IDL.Text,
+  'status' : IDL.Text,
+  'date' : IDL.Text,
+  'reviewerNote' : IDL.Opt(IDL.Text),
+  'personnelId' : IDL.Text,
+  'requestedCheckIn' : IDL.Int,
+  'requestedCheckOut' : IDL.Int,
+  'companyId' : IDL.Text,
+});
+export const AuditLog = IDL.Record({
+  'id' : IDL.Text,
+  'actionType' : IDL.Text,
+  'actorId' : IDL.Text,
+  'timestamp' : IDL.Int,
+  'details' : IDL.Text,
+  'targetId' : IDL.Text,
   'companyId' : IDL.Text,
 });
 export const UserProfile = IDL.Record({
@@ -45,6 +96,43 @@ export const DepartmentSummary = IDL.Record({
   'personnel' : IDL.Vec(Personnel),
   'department' : IDL.Text,
 });
+export const LeaveBalance = IDL.Record({
+  'leaveTypeId' : IDL.Text,
+  'personnelId' : IDL.Text,
+  'usedDays' : IDL.Nat,
+});
+export const LeaveRequest = IDL.Record({
+  'id' : IDL.Text,
+  'status' : IDL.Text,
+  'endDate' : IDL.Text,
+  'days' : IDL.Nat,
+  'reviewerNote' : IDL.Opt(IDL.Text),
+  'leaveTypeId' : IDL.Text,
+  'personnelId' : IDL.Text,
+  'startDate' : IDL.Text,
+  'reason' : IDL.Text,
+  'companyId' : IDL.Text,
+});
+export const Notification = IDL.Record({
+  'id' : IDL.Text,
+  'notifType' : IDL.Text,
+  'createdAt' : IDL.Int,
+  'isRead' : IDL.Bool,
+  'personnelId' : IDL.Text,
+  'message' : IDL.Text,
+  'companyId' : IDL.Text,
+});
+export const PayrollEntry = IDL.Record({
+  'month' : IDL.Nat,
+  'name' : IDL.Text,
+  'year' : IDL.Nat,
+  'totalWorkMinutes' : IDL.Int,
+  'personnelId' : IDL.Text,
+  'absenceDays' : IDL.Nat,
+  'lateCount' : IDL.Nat,
+  'department' : IDL.Text,
+  'leaveDays' : IDL.Nat,
+});
 
 export const idlService = IDL.Service({
   '_initializeAccessControlWithSecret' : IDL.Func([IDL.Text], [], []),
@@ -54,11 +142,32 @@ export const idlService = IDL.Service({
       [],
     ),
   'assignCallerUserRole' : IDL.Func([IDL.Principal, UserRole], [], []),
+  'assignShift' : IDL.Func([IDL.Text, IDL.Text], [Personnel], []),
   'checkIn' : IDL.Func([IDL.Text, IDL.Text], [IDL.Opt(AttendanceRecord)], []),
   'checkOut' : IDL.Func([IDL.Text], [IDL.Opt(AttendanceRecord)], []),
+  'createAnnouncement' : IDL.Func(
+      [IDL.Text, IDL.Text, IDL.Text],
+      [Announcement],
+      [],
+    ),
+  'createDefaultLeaveTypes' : IDL.Func([IDL.Text], [], []),
+  'createLeaveType' : IDL.Func([IDL.Text, IDL.Text, IDL.Nat], [LeaveType], []),
+  'createShift' : IDL.Func(
+      [IDL.Text, IDL.Text, IDL.Text, IDL.Text, IDL.Text],
+      [Shift],
+      [],
+    ),
+  'deleteAnnouncement' : IDL.Func([IDL.Text, IDL.Text], [IDL.Bool], []),
+  'endBreak' : IDL.Func([IDL.Text], [IDL.Opt(BreakRecord)], []),
+  'getActiveBreak' : IDL.Func([IDL.Text], [IDL.Opt(BreakRecord)], ['query']),
   'getActiveCheckIn' : IDL.Func(
       [IDL.Text],
       [IDL.Opt(AttendanceRecord)],
+      ['query'],
+    ),
+  'getAnnouncementsByCompany' : IDL.Func(
+      [IDL.Text],
+      [IDL.Vec(Announcement)],
       ['query'],
     ),
   'getAttendanceByCompany' : IDL.Func(
@@ -71,12 +180,54 @@ export const idlService = IDL.Service({
       [IDL.Vec(AttendanceRecord)],
       ['query'],
     ),
+  'getAttendanceCorrectionsByCompany' : IDL.Func(
+      [IDL.Text],
+      [IDL.Vec(AttendanceCorrectionRequest)],
+      ['query'],
+    ),
+  'getAttendanceCorrectionsByPersonnel' : IDL.Func(
+      [IDL.Text],
+      [IDL.Vec(AttendanceCorrectionRequest)],
+      ['query'],
+    ),
+  'getAttendanceScore' : IDL.Func([IDL.Text, IDL.Text], [IDL.Nat], ['query']),
+  'getAuditLogByCompany' : IDL.Func([IDL.Text], [IDL.Vec(AuditLog)], ['query']),
   'getCallerUserProfile' : IDL.Func([], [IDL.Opt(UserProfile)], ['query']),
   'getCallerUserRole' : IDL.Func([], [UserRole], ['query']),
   'getCompanyById' : IDL.Func([IDL.Text], [Company], ['query']),
   'getDepartmentSummaries' : IDL.Func(
       [IDL.Text],
       [IDL.Vec(DepartmentSummary)],
+      ['query'],
+    ),
+  'getLeaveBalance' : IDL.Func(
+      [IDL.Text, IDL.Text],
+      [IDL.Opt(LeaveBalance)],
+      ['query'],
+    ),
+  'getLeaveRequestsByCompany' : IDL.Func(
+      [IDL.Text],
+      [IDL.Vec(LeaveRequest)],
+      ['query'],
+    ),
+  'getLeaveRequestsByPersonnel' : IDL.Func(
+      [IDL.Text],
+      [IDL.Vec(LeaveRequest)],
+      ['query'],
+    ),
+  'getLeaveTypesByCompany' : IDL.Func(
+      [IDL.Text],
+      [IDL.Vec(LeaveType)],
+      ['query'],
+    ),
+  'getNotificationsByPersonnel' : IDL.Func(
+      [IDL.Text],
+      [IDL.Vec(Notification)],
+      ['query'],
+    ),
+  'getPayrollSummary' : IDL.Func(
+      [IDL.Text, IDL.Nat, IDL.Nat],
+      [IDL.Vec(PayrollEntry)],
       ['query'],
     ),
   'getPersonAttendanceByDate' : IDL.Func(
@@ -86,17 +237,47 @@ export const idlService = IDL.Service({
     ),
   'getPersonById' : IDL.Func([IDL.Text], [Personnel], ['query']),
   'getPersonnelList' : IDL.Func([IDL.Text], [IDL.Vec(Personnel)], ['query']),
+  'getShiftsByCompany' : IDL.Func([IDL.Text], [IDL.Vec(Shift)], ['query']),
+  'getUnreadCount' : IDL.Func([IDL.Text], [IDL.Nat], ['query']),
   'getUserProfile' : IDL.Func(
       [IDL.Principal],
       [IDL.Opt(UserProfile)],
       ['query'],
     ),
   'isCallerAdmin' : IDL.Func([], [IDL.Bool], ['query']),
+  'kioskCheckIn' : IDL.Func(
+      [IDL.Text, IDL.Text],
+      [IDL.Opt(AttendanceRecord)],
+      [],
+    ),
+  'kioskCheckOut' : IDL.Func([IDL.Text], [IDL.Opt(AttendanceRecord)], []),
   'linkPersonnelToPrincipal' : IDL.Func([IDL.Text], [IDL.Opt(Personnel)], []),
   'loginCompany' : IDL.Func([IDL.Text], [IDL.Opt(Company)], []),
   'loginPersonnel' : IDL.Func([IDL.Text], [IDL.Opt(Personnel)], ['query']),
+  'markNotificationRead' : IDL.Func([IDL.Text], [IDL.Bool], []),
   'registerCompany' : IDL.Func([IDL.Text], [Company], []),
+  'reviewAttendanceCorrection' : IDL.Func(
+      [IDL.Text, IDL.Text, IDL.Text, IDL.Opt(IDL.Text)],
+      [AttendanceCorrectionRequest],
+      [],
+    ),
+  'reviewLeaveRequest' : IDL.Func(
+      [IDL.Text, IDL.Text, IDL.Text, IDL.Opt(IDL.Text)],
+      [LeaveRequest],
+      [],
+    ),
   'saveCallerUserProfile' : IDL.Func([UserProfile], [], []),
+  'startBreak' : IDL.Func([IDL.Text, IDL.Text], [BreakRecord], []),
+  'submitAttendanceCorrection' : IDL.Func(
+      [IDL.Text, IDL.Text, IDL.Text, IDL.Int, IDL.Int],
+      [AttendanceCorrectionRequest],
+      [],
+    ),
+  'submitLeaveRequest' : IDL.Func(
+      [IDL.Text, IDL.Text, IDL.Text, IDL.Text, IDL.Nat, IDL.Text],
+      [LeaveRequest],
+      [],
+    ),
   'updatePersonnel' : IDL.Func(
       [IDL.Text, IDL.Text, IDL.Text, IDL.Bool],
       [IDL.Opt(Personnel)],
@@ -114,6 +295,7 @@ export const idlFactory = ({ IDL }) => {
     'isActive' : IDL.Bool,
     'isAdmin' : IDL.Bool,
     'department' : IDL.Text,
+    'shiftId' : IDL.Opt(IDL.Text),
     'companyId' : IDL.Text,
   });
   const UserRole = IDL.Variant({
@@ -127,6 +309,56 @@ export const idlFactory = ({ IDL }) => {
     'checkIn' : IDL.Int,
     'personnelId' : IDL.Text,
     'checkOut' : IDL.Int,
+    'companyId' : IDL.Text,
+  });
+  const Announcement = IDL.Record({
+    'id' : IDL.Text,
+    'title' : IDL.Text,
+    'content' : IDL.Text,
+    'authorId' : IDL.Text,
+    'createdAt' : IDL.Int,
+    'isActive' : IDL.Bool,
+    'companyId' : IDL.Text,
+  });
+  const LeaveType = IDL.Record({
+    'id' : IDL.Text,
+    'annualQuota' : IDL.Nat,
+    'name' : IDL.Text,
+    'companyId' : IDL.Text,
+  });
+  const Shift = IDL.Record({
+    'id' : IDL.Text,
+    'startTime' : IDL.Text,
+    'endTime' : IDL.Text,
+    'name' : IDL.Text,
+    'workDays' : IDL.Text,
+    'companyId' : IDL.Text,
+  });
+  const BreakRecord = IDL.Record({
+    'id' : IDL.Text,
+    'startTime' : IDL.Int,
+    'endTime' : IDL.Opt(IDL.Int),
+    'isActive' : IDL.Bool,
+    'personnelId' : IDL.Text,
+    'attendanceId' : IDL.Text,
+  });
+  const AttendanceCorrectionRequest = IDL.Record({
+    'id' : IDL.Text,
+    'status' : IDL.Text,
+    'date' : IDL.Text,
+    'reviewerNote' : IDL.Opt(IDL.Text),
+    'personnelId' : IDL.Text,
+    'requestedCheckIn' : IDL.Int,
+    'requestedCheckOut' : IDL.Int,
+    'companyId' : IDL.Text,
+  });
+  const AuditLog = IDL.Record({
+    'id' : IDL.Text,
+    'actionType' : IDL.Text,
+    'actorId' : IDL.Text,
+    'timestamp' : IDL.Int,
+    'details' : IDL.Text,
+    'targetId' : IDL.Text,
     'companyId' : IDL.Text,
   });
   const UserProfile = IDL.Record({
@@ -144,6 +376,43 @@ export const idlFactory = ({ IDL }) => {
     'personnel' : IDL.Vec(Personnel),
     'department' : IDL.Text,
   });
+  const LeaveBalance = IDL.Record({
+    'leaveTypeId' : IDL.Text,
+    'personnelId' : IDL.Text,
+    'usedDays' : IDL.Nat,
+  });
+  const LeaveRequest = IDL.Record({
+    'id' : IDL.Text,
+    'status' : IDL.Text,
+    'endDate' : IDL.Text,
+    'days' : IDL.Nat,
+    'reviewerNote' : IDL.Opt(IDL.Text),
+    'leaveTypeId' : IDL.Text,
+    'personnelId' : IDL.Text,
+    'startDate' : IDL.Text,
+    'reason' : IDL.Text,
+    'companyId' : IDL.Text,
+  });
+  const Notification = IDL.Record({
+    'id' : IDL.Text,
+    'notifType' : IDL.Text,
+    'createdAt' : IDL.Int,
+    'isRead' : IDL.Bool,
+    'personnelId' : IDL.Text,
+    'message' : IDL.Text,
+    'companyId' : IDL.Text,
+  });
+  const PayrollEntry = IDL.Record({
+    'month' : IDL.Nat,
+    'name' : IDL.Text,
+    'year' : IDL.Nat,
+    'totalWorkMinutes' : IDL.Int,
+    'personnelId' : IDL.Text,
+    'absenceDays' : IDL.Nat,
+    'lateCount' : IDL.Nat,
+    'department' : IDL.Text,
+    'leaveDays' : IDL.Nat,
+  });
   
   return IDL.Service({
     '_initializeAccessControlWithSecret' : IDL.Func([IDL.Text], [], []),
@@ -153,11 +422,36 @@ export const idlFactory = ({ IDL }) => {
         [],
       ),
     'assignCallerUserRole' : IDL.Func([IDL.Principal, UserRole], [], []),
+    'assignShift' : IDL.Func([IDL.Text, IDL.Text], [Personnel], []),
     'checkIn' : IDL.Func([IDL.Text, IDL.Text], [IDL.Opt(AttendanceRecord)], []),
     'checkOut' : IDL.Func([IDL.Text], [IDL.Opt(AttendanceRecord)], []),
+    'createAnnouncement' : IDL.Func(
+        [IDL.Text, IDL.Text, IDL.Text],
+        [Announcement],
+        [],
+      ),
+    'createDefaultLeaveTypes' : IDL.Func([IDL.Text], [], []),
+    'createLeaveType' : IDL.Func(
+        [IDL.Text, IDL.Text, IDL.Nat],
+        [LeaveType],
+        [],
+      ),
+    'createShift' : IDL.Func(
+        [IDL.Text, IDL.Text, IDL.Text, IDL.Text, IDL.Text],
+        [Shift],
+        [],
+      ),
+    'deleteAnnouncement' : IDL.Func([IDL.Text, IDL.Text], [IDL.Bool], []),
+    'endBreak' : IDL.Func([IDL.Text], [IDL.Opt(BreakRecord)], []),
+    'getActiveBreak' : IDL.Func([IDL.Text], [IDL.Opt(BreakRecord)], ['query']),
     'getActiveCheckIn' : IDL.Func(
         [IDL.Text],
         [IDL.Opt(AttendanceRecord)],
+        ['query'],
+      ),
+    'getAnnouncementsByCompany' : IDL.Func(
+        [IDL.Text],
+        [IDL.Vec(Announcement)],
         ['query'],
       ),
     'getAttendanceByCompany' : IDL.Func(
@@ -170,12 +464,58 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Vec(AttendanceRecord)],
         ['query'],
       ),
+    'getAttendanceCorrectionsByCompany' : IDL.Func(
+        [IDL.Text],
+        [IDL.Vec(AttendanceCorrectionRequest)],
+        ['query'],
+      ),
+    'getAttendanceCorrectionsByPersonnel' : IDL.Func(
+        [IDL.Text],
+        [IDL.Vec(AttendanceCorrectionRequest)],
+        ['query'],
+      ),
+    'getAttendanceScore' : IDL.Func([IDL.Text, IDL.Text], [IDL.Nat], ['query']),
+    'getAuditLogByCompany' : IDL.Func(
+        [IDL.Text],
+        [IDL.Vec(AuditLog)],
+        ['query'],
+      ),
     'getCallerUserProfile' : IDL.Func([], [IDL.Opt(UserProfile)], ['query']),
     'getCallerUserRole' : IDL.Func([], [UserRole], ['query']),
     'getCompanyById' : IDL.Func([IDL.Text], [Company], ['query']),
     'getDepartmentSummaries' : IDL.Func(
         [IDL.Text],
         [IDL.Vec(DepartmentSummary)],
+        ['query'],
+      ),
+    'getLeaveBalance' : IDL.Func(
+        [IDL.Text, IDL.Text],
+        [IDL.Opt(LeaveBalance)],
+        ['query'],
+      ),
+    'getLeaveRequestsByCompany' : IDL.Func(
+        [IDL.Text],
+        [IDL.Vec(LeaveRequest)],
+        ['query'],
+      ),
+    'getLeaveRequestsByPersonnel' : IDL.Func(
+        [IDL.Text],
+        [IDL.Vec(LeaveRequest)],
+        ['query'],
+      ),
+    'getLeaveTypesByCompany' : IDL.Func(
+        [IDL.Text],
+        [IDL.Vec(LeaveType)],
+        ['query'],
+      ),
+    'getNotificationsByPersonnel' : IDL.Func(
+        [IDL.Text],
+        [IDL.Vec(Notification)],
+        ['query'],
+      ),
+    'getPayrollSummary' : IDL.Func(
+        [IDL.Text, IDL.Nat, IDL.Nat],
+        [IDL.Vec(PayrollEntry)],
         ['query'],
       ),
     'getPersonAttendanceByDate' : IDL.Func(
@@ -185,17 +525,47 @@ export const idlFactory = ({ IDL }) => {
       ),
     'getPersonById' : IDL.Func([IDL.Text], [Personnel], ['query']),
     'getPersonnelList' : IDL.Func([IDL.Text], [IDL.Vec(Personnel)], ['query']),
+    'getShiftsByCompany' : IDL.Func([IDL.Text], [IDL.Vec(Shift)], ['query']),
+    'getUnreadCount' : IDL.Func([IDL.Text], [IDL.Nat], ['query']),
     'getUserProfile' : IDL.Func(
         [IDL.Principal],
         [IDL.Opt(UserProfile)],
         ['query'],
       ),
     'isCallerAdmin' : IDL.Func([], [IDL.Bool], ['query']),
+    'kioskCheckIn' : IDL.Func(
+        [IDL.Text, IDL.Text],
+        [IDL.Opt(AttendanceRecord)],
+        [],
+      ),
+    'kioskCheckOut' : IDL.Func([IDL.Text], [IDL.Opt(AttendanceRecord)], []),
     'linkPersonnelToPrincipal' : IDL.Func([IDL.Text], [IDL.Opt(Personnel)], []),
     'loginCompany' : IDL.Func([IDL.Text], [IDL.Opt(Company)], []),
     'loginPersonnel' : IDL.Func([IDL.Text], [IDL.Opt(Personnel)], ['query']),
+    'markNotificationRead' : IDL.Func([IDL.Text], [IDL.Bool], []),
     'registerCompany' : IDL.Func([IDL.Text], [Company], []),
+    'reviewAttendanceCorrection' : IDL.Func(
+        [IDL.Text, IDL.Text, IDL.Text, IDL.Opt(IDL.Text)],
+        [AttendanceCorrectionRequest],
+        [],
+      ),
+    'reviewLeaveRequest' : IDL.Func(
+        [IDL.Text, IDL.Text, IDL.Text, IDL.Opt(IDL.Text)],
+        [LeaveRequest],
+        [],
+      ),
     'saveCallerUserProfile' : IDL.Func([UserProfile], [], []),
+    'startBreak' : IDL.Func([IDL.Text, IDL.Text], [BreakRecord], []),
+    'submitAttendanceCorrection' : IDL.Func(
+        [IDL.Text, IDL.Text, IDL.Text, IDL.Int, IDL.Int],
+        [AttendanceCorrectionRequest],
+        [],
+      ),
+    'submitLeaveRequest' : IDL.Func(
+        [IDL.Text, IDL.Text, IDL.Text, IDL.Text, IDL.Nat, IDL.Text],
+        [LeaveRequest],
+        [],
+      ),
     'updatePersonnel' : IDL.Func(
         [IDL.Text, IDL.Text, IDL.Text, IDL.Bool],
         [IDL.Opt(Personnel)],

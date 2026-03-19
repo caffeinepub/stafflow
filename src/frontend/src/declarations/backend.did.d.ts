@@ -10,6 +10,25 @@ import type { ActorMethod } from '@icp-sdk/core/agent';
 import type { IDL } from '@icp-sdk/core/candid';
 import type { Principal } from '@icp-sdk/core/principal';
 
+export interface Announcement {
+  'id' : string,
+  'title' : string,
+  'content' : string,
+  'authorId' : string,
+  'createdAt' : bigint,
+  'isActive' : boolean,
+  'companyId' : string,
+}
+export interface AttendanceCorrectionRequest {
+  'id' : string,
+  'status' : string,
+  'date' : string,
+  'reviewerNote' : [] | [string],
+  'personnelId' : string,
+  'requestedCheckIn' : bigint,
+  'requestedCheckOut' : bigint,
+  'companyId' : string,
+}
 export interface AttendanceRecord {
   'id' : string,
   'hasCheckedOut' : boolean,
@@ -17,6 +36,23 @@ export interface AttendanceRecord {
   'personnelId' : string,
   'checkOut' : bigint,
   'companyId' : string,
+}
+export interface AuditLog {
+  'id' : string,
+  'actionType' : string,
+  'actorId' : string,
+  'timestamp' : bigint,
+  'details' : string,
+  'targetId' : string,
+  'companyId' : string,
+}
+export interface BreakRecord {
+  'id' : string,
+  'startTime' : bigint,
+  'endTime' : [] | [bigint],
+  'isActive' : boolean,
+  'personnelId' : string,
+  'attendanceId' : string,
 }
 export interface Company {
   'id' : string,
@@ -28,6 +64,49 @@ export interface DepartmentSummary {
   'personnel' : Array<Personnel>,
   'department' : string,
 }
+export interface LeaveBalance {
+  'leaveTypeId' : string,
+  'personnelId' : string,
+  'usedDays' : bigint,
+}
+export interface LeaveRequest {
+  'id' : string,
+  'status' : string,
+  'endDate' : string,
+  'days' : bigint,
+  'reviewerNote' : [] | [string],
+  'leaveTypeId' : string,
+  'personnelId' : string,
+  'startDate' : string,
+  'reason' : string,
+  'companyId' : string,
+}
+export interface LeaveType {
+  'id' : string,
+  'annualQuota' : bigint,
+  'name' : string,
+  'companyId' : string,
+}
+export interface Notification {
+  'id' : string,
+  'notifType' : string,
+  'createdAt' : bigint,
+  'isRead' : boolean,
+  'personnelId' : string,
+  'message' : string,
+  'companyId' : string,
+}
+export interface PayrollEntry {
+  'month' : bigint,
+  'name' : string,
+  'year' : bigint,
+  'totalWorkMinutes' : bigint,
+  'personnelId' : string,
+  'absenceDays' : bigint,
+  'lateCount' : bigint,
+  'department' : string,
+  'leaveDays' : bigint,
+}
 export interface Personnel {
   'id' : string,
   'entryCode' : string,
@@ -35,6 +114,15 @@ export interface Personnel {
   'isActive' : boolean,
   'isAdmin' : boolean,
   'department' : string,
+  'shiftId' : [] | [string],
+  'companyId' : string,
+}
+export interface Shift {
+  'id' : string,
+  'startTime' : string,
+  'endTime' : string,
+  'name' : string,
+  'workDays' : string,
   'companyId' : string,
 }
 export interface UserProfile {
@@ -49,28 +137,78 @@ export interface _SERVICE {
   '_initializeAccessControlWithSecret' : ActorMethod<[string], undefined>,
   'addPersonnel' : ActorMethod<[string, string, string, boolean], Personnel>,
   'assignCallerUserRole' : ActorMethod<[Principal, UserRole], undefined>,
+  'assignShift' : ActorMethod<[string, string], Personnel>,
   'checkIn' : ActorMethod<[string, string], [] | [AttendanceRecord]>,
   'checkOut' : ActorMethod<[string], [] | [AttendanceRecord]>,
+  'createAnnouncement' : ActorMethod<[string, string, string], Announcement>,
+  'createDefaultLeaveTypes' : ActorMethod<[string], undefined>,
+  'createLeaveType' : ActorMethod<[string, string, bigint], LeaveType>,
+  'createShift' : ActorMethod<[string, string, string, string, string], Shift>,
+  'deleteAnnouncement' : ActorMethod<[string, string], boolean>,
+  'endBreak' : ActorMethod<[string], [] | [BreakRecord]>,
+  'getActiveBreak' : ActorMethod<[string], [] | [BreakRecord]>,
   'getActiveCheckIn' : ActorMethod<[string], [] | [AttendanceRecord]>,
+  'getAnnouncementsByCompany' : ActorMethod<[string], Array<Announcement>>,
   'getAttendanceByCompany' : ActorMethod<[string], Array<AttendanceRecord>>,
   'getAttendanceByPersonnel' : ActorMethod<[string], Array<AttendanceRecord>>,
+  'getAttendanceCorrectionsByCompany' : ActorMethod<
+    [string],
+    Array<AttendanceCorrectionRequest>
+  >,
+  'getAttendanceCorrectionsByPersonnel' : ActorMethod<
+    [string],
+    Array<AttendanceCorrectionRequest>
+  >,
+  'getAttendanceScore' : ActorMethod<[string, string], bigint>,
+  'getAuditLogByCompany' : ActorMethod<[string], Array<AuditLog>>,
   'getCallerUserProfile' : ActorMethod<[], [] | [UserProfile]>,
   'getCallerUserRole' : ActorMethod<[], UserRole>,
   'getCompanyById' : ActorMethod<[string], Company>,
   'getDepartmentSummaries' : ActorMethod<[string], Array<DepartmentSummary>>,
+  'getLeaveBalance' : ActorMethod<[string, string], [] | [LeaveBalance]>,
+  'getLeaveRequestsByCompany' : ActorMethod<[string], Array<LeaveRequest>>,
+  'getLeaveRequestsByPersonnel' : ActorMethod<[string], Array<LeaveRequest>>,
+  'getLeaveTypesByCompany' : ActorMethod<[string], Array<LeaveType>>,
+  'getNotificationsByPersonnel' : ActorMethod<[string], Array<Notification>>,
+  'getPayrollSummary' : ActorMethod<
+    [string, bigint, bigint],
+    Array<PayrollEntry>
+  >,
   'getPersonAttendanceByDate' : ActorMethod<
     [string, bigint, bigint],
     Array<AttendanceRecord>
   >,
   'getPersonById' : ActorMethod<[string], Personnel>,
   'getPersonnelList' : ActorMethod<[string], Array<Personnel>>,
+  'getShiftsByCompany' : ActorMethod<[string], Array<Shift>>,
+  'getUnreadCount' : ActorMethod<[string], bigint>,
   'getUserProfile' : ActorMethod<[Principal], [] | [UserProfile]>,
   'isCallerAdmin' : ActorMethod<[], boolean>,
+  'kioskCheckIn' : ActorMethod<[string, string], [] | [AttendanceRecord]>,
+  'kioskCheckOut' : ActorMethod<[string], [] | [AttendanceRecord]>,
   'linkPersonnelToPrincipal' : ActorMethod<[string], [] | [Personnel]>,
   'loginCompany' : ActorMethod<[string], [] | [Company]>,
   'loginPersonnel' : ActorMethod<[string], [] | [Personnel]>,
+  'markNotificationRead' : ActorMethod<[string], boolean>,
   'registerCompany' : ActorMethod<[string], Company>,
+  'reviewAttendanceCorrection' : ActorMethod<
+    [string, string, string, [] | [string]],
+    AttendanceCorrectionRequest
+  >,
+  'reviewLeaveRequest' : ActorMethod<
+    [string, string, string, [] | [string]],
+    LeaveRequest
+  >,
   'saveCallerUserProfile' : ActorMethod<[UserProfile], undefined>,
+  'startBreak' : ActorMethod<[string, string], BreakRecord>,
+  'submitAttendanceCorrection' : ActorMethod<
+    [string, string, string, bigint, bigint],
+    AttendanceCorrectionRequest
+  >,
+  'submitLeaveRequest' : ActorMethod<
+    [string, string, string, string, bigint, string],
+    LeaveRequest
+  >,
   'updatePersonnel' : ActorMethod<
     [string, string, string, boolean],
     [] | [Personnel]
