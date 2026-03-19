@@ -944,6 +944,19 @@ export function updateEmployee(
   return { ok: true, employee: employees[idx], message: "Employee updated" };
 }
 
+export function addEmployeeToCompanyDirect(
+  employeeId: string,
+  companyId: string,
+): void {
+  const employees = load<Employee>(KEYS.employees);
+  const idx = employees.findIndex((e) => e.id === employeeId);
+  if (idx === -1) return;
+  if (!employees[idx].companyIds.includes(companyId)) {
+    employees[idx].companyIds.push(companyId);
+    save(KEYS.employees, employees);
+  }
+}
+
 export function getCompany(id: string): Company | undefined {
   return load<Company>(KEYS.companies).find((c) => c.id === id);
 }
@@ -1966,4 +1979,157 @@ export function getAttendanceScore(
   score = Math.max(0, Math.min(100, score));
 
   return { score, absences, lateCheckins, earlyCheckouts, fullDays };
+}
+
+// ===== EMPLOYEE DOCUMENTS =====
+
+export interface EmployeeDocument {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  employeeName: string;
+  docName: string;
+  fileBase64: string;
+  fileType: string;
+  category: "contract" | "identity" | "health" | "certificate" | "other";
+  uploadedAt: number;
+  note?: string;
+}
+
+const EMPLOYEE_DOCS_KEY = "sf_employee_docs";
+
+export function addEmployeeDoc(
+  companyId: string,
+  employeeId: string,
+  docName: string,
+  fileBase64: string,
+  fileType: string,
+  category: EmployeeDocument["category"],
+  note?: string,
+): { ok: boolean; message: string } {
+  const employee = getEmployee(employeeId);
+  if (!employee) return { ok: false, message: "Employee not found" };
+  const docs = load<EmployeeDocument>(EMPLOYEE_DOCS_KEY);
+  docs.push({
+    id: nextId(),
+    companyId,
+    employeeId,
+    employeeName: employee.fullName,
+    docName: docName.trim(),
+    fileBase64,
+    fileType,
+    category,
+    uploadedAt: Date.now(),
+    note: note?.trim() || undefined,
+  });
+  save(EMPLOYEE_DOCS_KEY, docs);
+  return { ok: true, message: "Document added" };
+}
+
+export function getEmployeeDocsByCompany(
+  companyId: string,
+): EmployeeDocument[] {
+  return load<EmployeeDocument>(EMPLOYEE_DOCS_KEY)
+    .filter((d) => d.companyId === companyId)
+    .sort((a, b) => b.uploadedAt - a.uploadedAt);
+}
+
+export function getEmployeeDocsByEmployee(
+  employeeId: string,
+  companyId: string,
+): EmployeeDocument[] {
+  return load<EmployeeDocument>(EMPLOYEE_DOCS_KEY)
+    .filter((d) => d.employeeId === employeeId && d.companyId === companyId)
+    .sort((a, b) => b.uploadedAt - a.uploadedAt);
+}
+
+export function deleteEmployeeDoc(
+  id: string,
+  companyId: string,
+): { ok: boolean; message: string } {
+  const docs = load<EmployeeDocument>(EMPLOYEE_DOCS_KEY).filter(
+    (d) => !(d.id === id && d.companyId === companyId),
+  );
+  save(EMPLOYEE_DOCS_KEY, docs);
+  return { ok: true, message: "Deleted" };
+}
+
+// ===== DEPT MANAGERS =====
+
+export interface DeptManager {
+  id: string;
+  companyId: string;
+  name: string;
+  loginCode: string;
+  departments: string[];
+  createdAt: number;
+}
+
+const DEPT_MANAGERS_KEY = "sf_dept_managers";
+
+export function createDeptManager(
+  companyId: string,
+  name: string,
+  departments: string[],
+): { ok: boolean; manager?: DeptManager; message: string } {
+  if (!name.trim()) return { ok: false, message: "Name required" };
+  const companies = load<Company>(KEYS.companies);
+  const employees = load<Employee>(KEYS.employees);
+  const managers = load<DeptManager>(DEPT_MANAGERS_KEY);
+  const existingCodes = [
+    ...companies.map((c) => c.loginCode),
+    ...employees.map((e) => e.loginCode),
+    ...managers.map((m) => m.loginCode),
+  ];
+  const loginCode = uniqueCode(12, existingCodes);
+  const manager: DeptManager = {
+    id: nextId(),
+    companyId,
+    name: name.trim(),
+    loginCode,
+    departments,
+    createdAt: Date.now(),
+  };
+  managers.push(manager);
+  save(DEPT_MANAGERS_KEY, managers);
+  return { ok: true, manager, message: "Manager created" };
+}
+
+export function getDeptManagers(companyId: string): DeptManager[] {
+  return load<DeptManager>(DEPT_MANAGERS_KEY).filter(
+    (m) => m.companyId === companyId,
+  );
+}
+
+export function getDeptManagerByCode(
+  loginCode: string,
+): DeptManager | undefined {
+  return load<DeptManager>(DEPT_MANAGERS_KEY).find(
+    (m) => m.loginCode === loginCode.trim(),
+  );
+}
+
+export function updateDeptManager(
+  id: string,
+  name: string,
+  departments: string[],
+): { ok: boolean; message: string } {
+  const managers = load<DeptManager>(DEPT_MANAGERS_KEY);
+  const idx = managers.findIndex((m) => m.id === id);
+  if (idx === -1) return { ok: false, message: "Not found" };
+  managers[idx].name = name.trim();
+  managers[idx].departments = departments;
+  save(DEPT_MANAGERS_KEY, managers);
+  return { ok: true, message: "Updated" };
+}
+
+export function deleteDeptManager(
+  id: string,
+  companyId: string,
+): { ok: boolean; message: string } {
+  const managers = load<DeptManager>(DEPT_MANAGERS_KEY).filter(
+    (m) => !(m.id === id && m.companyId === companyId),
+  );
+  save(DEPT_MANAGERS_KEY, managers);
+  return { ok: true, message: "Deleted" };
 }

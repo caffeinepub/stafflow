@@ -8,10 +8,200 @@
 
 import { IDL } from '@icp-sdk/core/candid';
 
-export const idlService = IDL.Service({});
+export const Personnel = IDL.Record({
+  'id' : IDL.Text,
+  'entryCode' : IDL.Text,
+  'name' : IDL.Text,
+  'isActive' : IDL.Bool,
+  'isAdmin' : IDL.Bool,
+  'department' : IDL.Text,
+  'companyId' : IDL.Text,
+});
+export const UserRole = IDL.Variant({
+  'admin' : IDL.Null,
+  'user' : IDL.Null,
+  'guest' : IDL.Null,
+});
+export const AttendanceRecord = IDL.Record({
+  'id' : IDL.Text,
+  'hasCheckedOut' : IDL.Bool,
+  'checkIn' : IDL.Int,
+  'personnelId' : IDL.Text,
+  'checkOut' : IDL.Int,
+  'companyId' : IDL.Text,
+});
+export const UserProfile = IDL.Record({
+  'name' : IDL.Text,
+  'personnelId' : IDL.Opt(IDL.Text),
+  'companyId' : IDL.Opt(IDL.Text),
+});
+export const Company = IDL.Record({
+  'id' : IDL.Text,
+  'entryCode' : IDL.Text,
+  'name' : IDL.Text,
+  'createdAt' : IDL.Int,
+});
+export const DepartmentSummary = IDL.Record({
+  'personnel' : IDL.Vec(Personnel),
+  'department' : IDL.Text,
+});
+
+export const idlService = IDL.Service({
+  '_initializeAccessControlWithSecret' : IDL.Func([IDL.Text], [], []),
+  'addPersonnel' : IDL.Func(
+      [IDL.Text, IDL.Text, IDL.Text, IDL.Bool],
+      [Personnel],
+      [],
+    ),
+  'assignCallerUserRole' : IDL.Func([IDL.Principal, UserRole], [], []),
+  'checkIn' : IDL.Func([IDL.Text, IDL.Text], [IDL.Opt(AttendanceRecord)], []),
+  'checkOut' : IDL.Func([IDL.Text], [IDL.Opt(AttendanceRecord)], []),
+  'getActiveCheckIn' : IDL.Func(
+      [IDL.Text],
+      [IDL.Opt(AttendanceRecord)],
+      ['query'],
+    ),
+  'getAttendanceByCompany' : IDL.Func(
+      [IDL.Text],
+      [IDL.Vec(AttendanceRecord)],
+      ['query'],
+    ),
+  'getAttendanceByPersonnel' : IDL.Func(
+      [IDL.Text],
+      [IDL.Vec(AttendanceRecord)],
+      ['query'],
+    ),
+  'getCallerUserProfile' : IDL.Func([], [IDL.Opt(UserProfile)], ['query']),
+  'getCallerUserRole' : IDL.Func([], [UserRole], ['query']),
+  'getCompanyById' : IDL.Func([IDL.Text], [Company], ['query']),
+  'getDepartmentSummaries' : IDL.Func(
+      [IDL.Text],
+      [IDL.Vec(DepartmentSummary)],
+      ['query'],
+    ),
+  'getPersonAttendanceByDate' : IDL.Func(
+      [IDL.Text, IDL.Int, IDL.Int],
+      [IDL.Vec(AttendanceRecord)],
+      ['query'],
+    ),
+  'getPersonById' : IDL.Func([IDL.Text], [Personnel], ['query']),
+  'getPersonnelList' : IDL.Func([IDL.Text], [IDL.Vec(Personnel)], ['query']),
+  'getUserProfile' : IDL.Func(
+      [IDL.Principal],
+      [IDL.Opt(UserProfile)],
+      ['query'],
+    ),
+  'isCallerAdmin' : IDL.Func([], [IDL.Bool], ['query']),
+  'linkPersonnelToPrincipal' : IDL.Func([IDL.Text], [IDL.Opt(Personnel)], []),
+  'loginCompany' : IDL.Func([IDL.Text], [IDL.Opt(Company)], []),
+  'loginPersonnel' : IDL.Func([IDL.Text], [IDL.Opt(Personnel)], ['query']),
+  'registerCompany' : IDL.Func([IDL.Text], [Company], []),
+  'saveCallerUserProfile' : IDL.Func([UserProfile], [], []),
+  'updatePersonnel' : IDL.Func(
+      [IDL.Text, IDL.Text, IDL.Text, IDL.Bool],
+      [IDL.Opt(Personnel)],
+      [],
+    ),
+});
 
 export const idlInitArgs = [];
 
-export const idlFactory = ({ IDL }) => { return IDL.Service({}); };
+export const idlFactory = ({ IDL }) => {
+  const Personnel = IDL.Record({
+    'id' : IDL.Text,
+    'entryCode' : IDL.Text,
+    'name' : IDL.Text,
+    'isActive' : IDL.Bool,
+    'isAdmin' : IDL.Bool,
+    'department' : IDL.Text,
+    'companyId' : IDL.Text,
+  });
+  const UserRole = IDL.Variant({
+    'admin' : IDL.Null,
+    'user' : IDL.Null,
+    'guest' : IDL.Null,
+  });
+  const AttendanceRecord = IDL.Record({
+    'id' : IDL.Text,
+    'hasCheckedOut' : IDL.Bool,
+    'checkIn' : IDL.Int,
+    'personnelId' : IDL.Text,
+    'checkOut' : IDL.Int,
+    'companyId' : IDL.Text,
+  });
+  const UserProfile = IDL.Record({
+    'name' : IDL.Text,
+    'personnelId' : IDL.Opt(IDL.Text),
+    'companyId' : IDL.Opt(IDL.Text),
+  });
+  const Company = IDL.Record({
+    'id' : IDL.Text,
+    'entryCode' : IDL.Text,
+    'name' : IDL.Text,
+    'createdAt' : IDL.Int,
+  });
+  const DepartmentSummary = IDL.Record({
+    'personnel' : IDL.Vec(Personnel),
+    'department' : IDL.Text,
+  });
+  
+  return IDL.Service({
+    '_initializeAccessControlWithSecret' : IDL.Func([IDL.Text], [], []),
+    'addPersonnel' : IDL.Func(
+        [IDL.Text, IDL.Text, IDL.Text, IDL.Bool],
+        [Personnel],
+        [],
+      ),
+    'assignCallerUserRole' : IDL.Func([IDL.Principal, UserRole], [], []),
+    'checkIn' : IDL.Func([IDL.Text, IDL.Text], [IDL.Opt(AttendanceRecord)], []),
+    'checkOut' : IDL.Func([IDL.Text], [IDL.Opt(AttendanceRecord)], []),
+    'getActiveCheckIn' : IDL.Func(
+        [IDL.Text],
+        [IDL.Opt(AttendanceRecord)],
+        ['query'],
+      ),
+    'getAttendanceByCompany' : IDL.Func(
+        [IDL.Text],
+        [IDL.Vec(AttendanceRecord)],
+        ['query'],
+      ),
+    'getAttendanceByPersonnel' : IDL.Func(
+        [IDL.Text],
+        [IDL.Vec(AttendanceRecord)],
+        ['query'],
+      ),
+    'getCallerUserProfile' : IDL.Func([], [IDL.Opt(UserProfile)], ['query']),
+    'getCallerUserRole' : IDL.Func([], [UserRole], ['query']),
+    'getCompanyById' : IDL.Func([IDL.Text], [Company], ['query']),
+    'getDepartmentSummaries' : IDL.Func(
+        [IDL.Text],
+        [IDL.Vec(DepartmentSummary)],
+        ['query'],
+      ),
+    'getPersonAttendanceByDate' : IDL.Func(
+        [IDL.Text, IDL.Int, IDL.Int],
+        [IDL.Vec(AttendanceRecord)],
+        ['query'],
+      ),
+    'getPersonById' : IDL.Func([IDL.Text], [Personnel], ['query']),
+    'getPersonnelList' : IDL.Func([IDL.Text], [IDL.Vec(Personnel)], ['query']),
+    'getUserProfile' : IDL.Func(
+        [IDL.Principal],
+        [IDL.Opt(UserProfile)],
+        ['query'],
+      ),
+    'isCallerAdmin' : IDL.Func([], [IDL.Bool], ['query']),
+    'linkPersonnelToPrincipal' : IDL.Func([IDL.Text], [IDL.Opt(Personnel)], []),
+    'loginCompany' : IDL.Func([IDL.Text], [IDL.Opt(Company)], []),
+    'loginPersonnel' : IDL.Func([IDL.Text], [IDL.Opt(Personnel)], ['query']),
+    'registerCompany' : IDL.Func([IDL.Text], [Company], []),
+    'saveCallerUserProfile' : IDL.Func([UserProfile], [], []),
+    'updatePersonnel' : IDL.Func(
+        [IDL.Text, IDL.Text, IDL.Text, IDL.Bool],
+        [IDL.Opt(Personnel)],
+        [],
+      ),
+  });
+};
 
 export const init = ({ IDL }) => { return []; };

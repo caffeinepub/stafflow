@@ -10,7 +10,72 @@ import type { ActorMethod } from '@icp-sdk/core/agent';
 import type { IDL } from '@icp-sdk/core/candid';
 import type { Principal } from '@icp-sdk/core/principal';
 
-export interface _SERVICE {}
+export interface AttendanceRecord {
+  'id' : string,
+  'hasCheckedOut' : boolean,
+  'checkIn' : bigint,
+  'personnelId' : string,
+  'checkOut' : bigint,
+  'companyId' : string,
+}
+export interface Company {
+  'id' : string,
+  'entryCode' : string,
+  'name' : string,
+  'createdAt' : bigint,
+}
+export interface DepartmentSummary {
+  'personnel' : Array<Personnel>,
+  'department' : string,
+}
+export interface Personnel {
+  'id' : string,
+  'entryCode' : string,
+  'name' : string,
+  'isActive' : boolean,
+  'isAdmin' : boolean,
+  'department' : string,
+  'companyId' : string,
+}
+export interface UserProfile {
+  'name' : string,
+  'personnelId' : [] | [string],
+  'companyId' : [] | [string],
+}
+export type UserRole = { 'admin' : null } |
+  { 'user' : null } |
+  { 'guest' : null };
+export interface _SERVICE {
+  '_initializeAccessControlWithSecret' : ActorMethod<[string], undefined>,
+  'addPersonnel' : ActorMethod<[string, string, string, boolean], Personnel>,
+  'assignCallerUserRole' : ActorMethod<[Principal, UserRole], undefined>,
+  'checkIn' : ActorMethod<[string, string], [] | [AttendanceRecord]>,
+  'checkOut' : ActorMethod<[string], [] | [AttendanceRecord]>,
+  'getActiveCheckIn' : ActorMethod<[string], [] | [AttendanceRecord]>,
+  'getAttendanceByCompany' : ActorMethod<[string], Array<AttendanceRecord>>,
+  'getAttendanceByPersonnel' : ActorMethod<[string], Array<AttendanceRecord>>,
+  'getCallerUserProfile' : ActorMethod<[], [] | [UserProfile]>,
+  'getCallerUserRole' : ActorMethod<[], UserRole>,
+  'getCompanyById' : ActorMethod<[string], Company>,
+  'getDepartmentSummaries' : ActorMethod<[string], Array<DepartmentSummary>>,
+  'getPersonAttendanceByDate' : ActorMethod<
+    [string, bigint, bigint],
+    Array<AttendanceRecord>
+  >,
+  'getPersonById' : ActorMethod<[string], Personnel>,
+  'getPersonnelList' : ActorMethod<[string], Array<Personnel>>,
+  'getUserProfile' : ActorMethod<[Principal], [] | [UserProfile]>,
+  'isCallerAdmin' : ActorMethod<[], boolean>,
+  'linkPersonnelToPrincipal' : ActorMethod<[string], [] | [Personnel]>,
+  'loginCompany' : ActorMethod<[string], [] | [Company]>,
+  'loginPersonnel' : ActorMethod<[string], [] | [Personnel]>,
+  'registerCompany' : ActorMethod<[string], Company>,
+  'saveCallerUserProfile' : ActorMethod<[UserProfile], undefined>,
+  'updatePersonnel' : ActorMethod<
+    [string, string, string, boolean],
+    [] | [Personnel]
+  >,
+}
 export declare const idlService: IDL.ServiceClass;
 export declare const idlInitArgs: IDL.Type[];
 export declare const idlFactory: IDL.InterfaceFactory;

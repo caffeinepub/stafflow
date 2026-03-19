@@ -89,10 +89,474 @@ export class ExternalBlob {
         return this;
     }
 }
-export interface backendInterface {
+export interface DepartmentSummary {
+    personnel: Array<Personnel>;
+    department: string;
 }
+export interface Company {
+    id: string;
+    entryCode: string;
+    name: string;
+    createdAt: bigint;
+}
+export interface AttendanceRecord {
+    id: string;
+    hasCheckedOut: boolean;
+    checkIn: bigint;
+    personnelId: string;
+    checkOut: bigint;
+    companyId: string;
+}
+export interface UserProfile {
+    name: string;
+    personnelId?: string;
+    companyId?: string;
+}
+export interface Personnel {
+    id: string;
+    entryCode: string;
+    name: string;
+    isActive: boolean;
+    isAdmin: boolean;
+    department: string;
+    companyId: string;
+}
+export enum UserRole {
+    admin = "admin",
+    user = "user",
+    guest = "guest"
+}
+export interface backendInterface {
+    _initializeAccessControlWithSecret(userSecret: string): Promise<void>;
+    addPersonnel(companyId: string, name: string, department: string, isAdmin: boolean): Promise<Personnel>;
+    assignCallerUserRole(user: Principal, role: UserRole): Promise<void>;
+    checkIn(personnelId: string, companyId: string): Promise<AttendanceRecord | null>;
+    checkOut(personnelId: string): Promise<AttendanceRecord | null>;
+    getActiveCheckIn(personnelId: string): Promise<AttendanceRecord | null>;
+    getAttendanceByCompany(companyId: string): Promise<Array<AttendanceRecord>>;
+    getAttendanceByPersonnel(personnelId: string): Promise<Array<AttendanceRecord>>;
+    getCallerUserProfile(): Promise<UserProfile | null>;
+    getCallerUserRole(): Promise<UserRole>;
+    getCompanyById(companyId: string): Promise<Company>;
+    getDepartmentSummaries(companyId: string): Promise<Array<DepartmentSummary>>;
+    getPersonAttendanceByDate(personId: string, dateStart: bigint, dateEnd: bigint): Promise<Array<AttendanceRecord>>;
+    getPersonById(personId: string): Promise<Personnel>;
+    getPersonnelList(companyId: string): Promise<Array<Personnel>>;
+    getUserProfile(user: Principal): Promise<UserProfile | null>;
+    isCallerAdmin(): Promise<boolean>;
+    linkPersonnelToPrincipal(entryCode: string): Promise<Personnel | null>;
+    loginCompany(entryCode: string): Promise<Company | null>;
+    loginPersonnel(entryCode: string): Promise<Personnel | null>;
+    registerCompany(name: string): Promise<Company>;
+    saveCallerUserProfile(profile: UserProfile): Promise<void>;
+    updatePersonnel(id: string, name: string, department: string, isActive: boolean): Promise<Personnel | null>;
+}
+import type { AttendanceRecord as _AttendanceRecord, Company as _Company, Personnel as _Personnel, UserProfile as _UserProfile, UserRole as _UserRole } from "./declarations/backend.did.d.ts";
 export class Backend implements backendInterface {
     constructor(private actor: ActorSubclass<_SERVICE>, private _uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, private _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, private processError?: (error: unknown) => never){}
+    async _initializeAccessControlWithSecret(arg0: string): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor._initializeAccessControlWithSecret(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor._initializeAccessControlWithSecret(arg0);
+            return result;
+        }
+    }
+    async addPersonnel(arg0: string, arg1: string, arg2: string, arg3: boolean): Promise<Personnel> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.addPersonnel(arg0, arg1, arg2, arg3);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.addPersonnel(arg0, arg1, arg2, arg3);
+            return result;
+        }
+    }
+    async assignCallerUserRole(arg0: Principal, arg1: UserRole): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.assignCallerUserRole(arg0, to_candid_UserRole_n1(this._uploadFile, this._downloadFile, arg1));
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.assignCallerUserRole(arg0, to_candid_UserRole_n1(this._uploadFile, this._downloadFile, arg1));
+            return result;
+        }
+    }
+    async checkIn(arg0: string, arg1: string): Promise<AttendanceRecord | null> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.checkIn(arg0, arg1);
+                return from_candid_opt_n3(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.checkIn(arg0, arg1);
+            return from_candid_opt_n3(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async checkOut(arg0: string): Promise<AttendanceRecord | null> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.checkOut(arg0);
+                return from_candid_opt_n3(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.checkOut(arg0);
+            return from_candid_opt_n3(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async getActiveCheckIn(arg0: string): Promise<AttendanceRecord | null> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getActiveCheckIn(arg0);
+                return from_candid_opt_n3(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getActiveCheckIn(arg0);
+            return from_candid_opt_n3(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async getAttendanceByCompany(arg0: string): Promise<Array<AttendanceRecord>> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getAttendanceByCompany(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getAttendanceByCompany(arg0);
+            return result;
+        }
+    }
+    async getAttendanceByPersonnel(arg0: string): Promise<Array<AttendanceRecord>> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getAttendanceByPersonnel(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getAttendanceByPersonnel(arg0);
+            return result;
+        }
+    }
+    async getCallerUserProfile(): Promise<UserProfile | null> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getCallerUserProfile();
+                return from_candid_opt_n4(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getCallerUserProfile();
+            return from_candid_opt_n4(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async getCallerUserRole(): Promise<UserRole> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getCallerUserRole();
+                return from_candid_UserRole_n8(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getCallerUserRole();
+            return from_candid_UserRole_n8(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async getCompanyById(arg0: string): Promise<Company> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getCompanyById(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getCompanyById(arg0);
+            return result;
+        }
+    }
+    async getDepartmentSummaries(arg0: string): Promise<Array<DepartmentSummary>> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getDepartmentSummaries(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getDepartmentSummaries(arg0);
+            return result;
+        }
+    }
+    async getPersonAttendanceByDate(arg0: string, arg1: bigint, arg2: bigint): Promise<Array<AttendanceRecord>> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getPersonAttendanceByDate(arg0, arg1, arg2);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getPersonAttendanceByDate(arg0, arg1, arg2);
+            return result;
+        }
+    }
+    async getPersonById(arg0: string): Promise<Personnel> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getPersonById(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getPersonById(arg0);
+            return result;
+        }
+    }
+    async getPersonnelList(arg0: string): Promise<Array<Personnel>> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getPersonnelList(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getPersonnelList(arg0);
+            return result;
+        }
+    }
+    async getUserProfile(arg0: Principal): Promise<UserProfile | null> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getUserProfile(arg0);
+                return from_candid_opt_n4(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getUserProfile(arg0);
+            return from_candid_opt_n4(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async isCallerAdmin(): Promise<boolean> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.isCallerAdmin();
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.isCallerAdmin();
+            return result;
+        }
+    }
+    async linkPersonnelToPrincipal(arg0: string): Promise<Personnel | null> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.linkPersonnelToPrincipal(arg0);
+                return from_candid_opt_n10(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.linkPersonnelToPrincipal(arg0);
+            return from_candid_opt_n10(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async loginCompany(arg0: string): Promise<Company | null> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.loginCompany(arg0);
+                return from_candid_opt_n11(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.loginCompany(arg0);
+            return from_candid_opt_n11(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async loginPersonnel(arg0: string): Promise<Personnel | null> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.loginPersonnel(arg0);
+                return from_candid_opt_n10(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.loginPersonnel(arg0);
+            return from_candid_opt_n10(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async registerCompany(arg0: string): Promise<Company> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.registerCompany(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.registerCompany(arg0);
+            return result;
+        }
+    }
+    async saveCallerUserProfile(arg0: UserProfile): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.saveCallerUserProfile(to_candid_UserProfile_n12(this._uploadFile, this._downloadFile, arg0));
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.saveCallerUserProfile(to_candid_UserProfile_n12(this._uploadFile, this._downloadFile, arg0));
+            return result;
+        }
+    }
+    async updatePersonnel(arg0: string, arg1: string, arg2: string, arg3: boolean): Promise<Personnel | null> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.updatePersonnel(arg0, arg1, arg2, arg3);
+                return from_candid_opt_n10(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.updatePersonnel(arg0, arg1, arg2, arg3);
+            return from_candid_opt_n10(this._uploadFile, this._downloadFile, result);
+        }
+    }
+}
+function from_candid_UserProfile_n5(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _UserProfile): UserProfile {
+    return from_candid_record_n6(_uploadFile, _downloadFile, value);
+}
+function from_candid_UserRole_n8(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _UserRole): UserRole {
+    return from_candid_variant_n9(_uploadFile, _downloadFile, value);
+}
+function from_candid_opt_n10(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [_Personnel]): Personnel | null {
+    return value.length === 0 ? null : value[0];
+}
+function from_candid_opt_n11(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [_Company]): Company | null {
+    return value.length === 0 ? null : value[0];
+}
+function from_candid_opt_n3(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [_AttendanceRecord]): AttendanceRecord | null {
+    return value.length === 0 ? null : value[0];
+}
+function from_candid_opt_n4(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [_UserProfile]): UserProfile | null {
+    return value.length === 0 ? null : from_candid_UserProfile_n5(_uploadFile, _downloadFile, value[0]);
+}
+function from_candid_opt_n7(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [string]): string | null {
+    return value.length === 0 ? null : value[0];
+}
+function from_candid_record_n6(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+    name: string;
+    personnelId: [] | [string];
+    companyId: [] | [string];
+}): {
+    name: string;
+    personnelId?: string;
+    companyId?: string;
+} {
+    return {
+        name: value.name,
+        personnelId: record_opt_to_undefined(from_candid_opt_n7(_uploadFile, _downloadFile, value.personnelId)),
+        companyId: record_opt_to_undefined(from_candid_opt_n7(_uploadFile, _downloadFile, value.companyId))
+    };
+}
+function from_candid_variant_n9(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+    admin: null;
+} | {
+    user: null;
+} | {
+    guest: null;
+}): UserRole {
+    return "admin" in value ? UserRole.admin : "user" in value ? UserRole.user : "guest" in value ? UserRole.guest : value;
+}
+function to_candid_UserProfile_n12(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: UserProfile): _UserProfile {
+    return to_candid_record_n13(_uploadFile, _downloadFile, value);
+}
+function to_candid_UserRole_n1(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: UserRole): _UserRole {
+    return to_candid_variant_n2(_uploadFile, _downloadFile, value);
+}
+function to_candid_record_n13(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+    name: string;
+    personnelId?: string;
+    companyId?: string;
+}): {
+    name: string;
+    personnelId: [] | [string];
+    companyId: [] | [string];
+} {
+    return {
+        name: value.name,
+        personnelId: value.personnelId ? candid_some(value.personnelId) : candid_none(),
+        companyId: value.companyId ? candid_some(value.companyId) : candid_none()
+    };
+}
+function to_candid_variant_n2(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: UserRole): {
+    admin: null;
+} | {
+    user: null;
+} | {
+    guest: null;
+} {
+    return value == UserRole.admin ? {
+        admin: null
+    } : value == UserRole.user ? {
+        user: null
+    } : value == UserRole.guest ? {
+        guest: null
+    } : value;
 }
 export interface CreateActorOptions {
     agent?: Agent;

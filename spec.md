@@ -1,53 +1,32 @@
-# StafFlow
+# StafFlow — Backend-First Rebuild
 
 ## Current State
-
-Sürüm 11 aktif. Mevcut özellikler: devam takibi, mola, vardiya, program planlama, izin yönetimi (tek havuz), izin bakiyesi, fazla mesai onayı, denetim kaydı, otomatik çıkış, kiosk modu, çoklu şirket görünümü, duyuru sistemi, eşik uyarıları, bordro özet raporu, toplu işlemler, istatistik sekmesi, belge ekleri.
+The application is a fully-featured localStorage-based prototype (v14) with 10+ languages, attendance tracking, leave management, shift management, and more. All data is stored locally in each browser — there is no shared backend. This makes multi-device, multi-user access impossible.
 
 ## Requested Changes (Diff)
 
 ### Add
-
-1. **İzin türleri yönetimi**
-   - Şirket, Ayarlar sekmesinde izin türleri tanımlayabilir (ad, yıllık gün kotası, renk)
-   - Varsayılan türler: Yıllık İzin, Hastalık İzni, Ücretsiz İzin, Mazeret İzni
-   - Her personelin her izin türü için ayrı bakiyesi tutulur (sf_leave_balances)
-   - İzin talebi oluşturulurken izin türü seçilir
-   - Onaylandığında ilgili türün bakiyesinden düşülür
-   - Özet ve bordro raporlarında izin türüne göre ayrıştırılmış görünüm
-
-2. **Vardiya değişim talebi**
-   - Personel panelinde "Vardiya Değişim Talebi" bölümü
-   - Personel: tarih, kendi vardiyası, karşı personel kodu ve vardiyası ile talep oluşturur
-   - Şirket panelinde Vardiya Değişim Talepleri sekmesi (onay/red)
-   - Onaylandığında program takviminde iki personelin vardiyası swap edilir
-   - Audit log'a eklenir
-
-3. **Devam puanı / performans özeti**
-   - Her personel için otomatik hesaplanan skor (0-100)
-   - Geç geliş, erken çıkış, devamsızlık sayısına göre puan düşülür; tam devam günleri puan ekler
-   - Personeller sekmesinde her satırda renk kodlu skor rozeti (yeşil/sarı/kırmızı)
-   - Yönetici filtresinde "Riskli personeller" seçeneği (skor < 60)
-   - Personel kendi puanını kendi panelinde görebilir
+- Motoko backend with persistent, shared data storage
+- Company registration: generates unique 16-char entry code, stores company data centrally
+- Personnel registration: generates unique 12-char code, links to a company
+- Check-in / check-out: records stored centrally, visible to all authorized users of that company
+- Role-based access: company admin, personnel (same code-based, passwordless auth)
+- Attendance records: viewable by admin (all personnel) and personnel (own records)
+- Basic dashboard for admin: today's check-ins, personnel list, attendance log
+- Basic dashboard for personnel: own check-in/out, own attendance history
+- Multi-language UI support (TR/EN at minimum for initial version)
+- Dark mode
+- Mobile-responsive layout
 
 ### Modify
-
-- İzin talebi formu: izin türü seçimi eklenir
-- İzin bakiyesi gösterimi: türe göre ayrıştırılmış kart
-- Personeller sekmesi: skor rozeti sütunu eklenir
+- Replace localStorage with backend canister calls for all data operations
 
 ### Remove
-
-- Hiçbir mevcut özellik kaldırılmıyor
+- localStorage as primary data store
 
 ## Implementation Plan
-
-1. localStorage veri yapılarına izin türleri (sf_leave_types), per-person per-type bakiye (sf_leave_balances), vardiya değişim talepleri (sf_shift_swaps) eklenir
-2. İzin türleri için Ayarlar sekmesine CRUD UI eklenir
-3. İzin talebi formu güncellenir (tür seçimi)
-4. Onay akışında tür bakiyesi düşülür
-5. Vardiya değişim talebi formu personel paneline eklenir
-6. Şirket paneline vardiya değişim talepleri onay UI'ı eklenir
-7. Devam puanı hesaplama fonksiyonu yazılır
-8. Personeller tablosuna skor rozeti eklenir, "Riskli" filtresi eklenir
-9. Personel panelinde kendi skoru gösterilir
+1. Generate Motoko backend: Company, Personnel, AttendanceRecord types with CRUD operations
+2. Backend exposes: registerCompany, loginCompany, addPersonnel, loginPersonnel, checkIn, checkOut, getAttendanceRecords, getPersonnelList
+3. Frontend: code-based login flow, company admin panel (personnel mgmt + attendance log), personnel panel (check-in/out + own history)
+4. Keep UI clean and mobile-friendly, support TR/EN language toggle
+5. Deploy and verify shared data works across devices

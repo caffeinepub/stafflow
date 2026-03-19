@@ -18,6 +18,9 @@ export interface Session {
   type: "company" | "employee";
   id: string;
   name: string;
+  companyId?: string;
+  role?: "admin" | "dept_manager";
+  departments?: string[];
 }
 
 export default function App() {

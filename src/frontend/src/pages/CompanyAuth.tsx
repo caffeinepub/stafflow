@@ -1,9 +1,9 @@
-import { ArrowLeft, Check, Copy, Moon, Sun } from "lucide-react";
+import { ArrowLeft, Check, Copy, Loader2, Moon, Sun } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import type { Page, Session } from "../App";
+import { useActor } from "../hooks/useActor";
 import { LANGUAGES, type Lang } from "../i18n";
-import { loginCompany, registerCompany } from "../store";
 
 interface Props {
   lang: Lang;
@@ -24,71 +24,94 @@ export default function CompanyAuth({
   setPage,
   onLogin,
 }: Props) {
+  const { actor, isFetching } = useActor();
   const [tab, setTab] = useState<"login" | "register">("login");
   const [loginCode, setLoginCode] = useState("");
   const [companyName, setCompanyName] = useState("");
-  const [authorizedPerson, setAuthorizedPerson] = useState("");
   const [loading, setLoading] = useState(false);
-  const [newCode, setNewCode] = useState<{
+  const [newCompany, setNewCompany] = useState<{
     code: string;
-    companyName: string;
+    name: string;
   } | null>(null);
   const [copied, setCopied] = useState(false);
 
-  function handleLogin() {
+  async function handleLogin() {
     if (!loginCode.trim()) {
       toast.error(t("codeRequired"));
       return;
     }
-    setLoading(true);
-    const res = loginCompany(loginCode);
-    setLoading(false);
-    if (!res.ok || !res.company) {
-      toast.error(t("invalidCode"));
+    if (!actor) {
+      toast.error(t("loading"));
       return;
     }
-    toast.success(t("success"));
-    onLogin({ type: "company", id: res.company.id, name: res.company.name });
+    setLoading(true);
+    try {
+      const company = await actor.loginCompany(loginCode.trim().toUpperCase());
+      if (!company) {
+        toast.error(t("invalidCode"));
+        return;
+      }
+      toast.success(t("success"));
+      onLogin({ type: "company", id: company.id, name: company.name });
+    } catch (err) {
+      console.error(err);
+      toast.error(t("error"));
+    } finally {
+      setLoading(false);
+    }
   }
 
-  function handleRegister() {
+  async function handleRegister() {
     if (!companyName.trim()) {
       toast.error(t("companyRequired"));
       return;
     }
-    setLoading(true);
-    const res = registerCompany(companyName, authorizedPerson || undefined);
-    setLoading(false);
-    if (!res.ok) {
-      toast.error(res.message);
+    if (!actor) {
+      toast.error(t("loading"));
       return;
     }
-    setNewCode({ code: res.loginCode, companyName });
+    setLoading(true);
+    try {
+      const company = await actor.registerCompany(companyName.trim());
+      setNewCompany({ code: company.entryCode, name: company.name });
+      toast.success(t("success"));
+    } catch (err) {
+      console.error(err);
+      toast.error(t("error"));
+    } finally {
+      setLoading(false);
+    }
   }
 
   function copyCode() {
-    navigator.clipboard.writeText(newCode?.code || "");
+    navigator.clipboard.writeText(newCompany?.code || "");
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
 
-  function proceedToDashboard() {
-    const res = loginCompany(newCode!.code);
-    if (res.ok && res.company) {
-      onLogin({ type: "company", id: res.company.id, name: res.company.name });
+  async function proceedToDashboard() {
+    if (!actor || !newCompany) return;
+    try {
+      const company = await actor.loginCompany(newCompany.code);
+      if (company) {
+        onLogin({ type: "company", id: company.id, name: company.name });
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error(t("error"));
     }
   }
 
-  if (newCode) {
+  if (newCompany) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-background">
         <div className="w-full max-w-md">
-          <div className="bg-card border border-border rounded-2xl p-8 shadow-xl">
+          <div className="bg-card border border-border rounded-2xl p-8 shadow-card">
             <div className="text-center mb-6">
-              <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center mx-auto mb-4">
-                <Check size={32} className="text-green-500" />
+              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
+                <Check size={32} className="text-primary" />
               </div>
-              <h2 className="text-xl font-bold">{newCode.companyName}</h2>
+              <h2 className="text-xl font-bold">{newCompany.name}</h2>
               <p className="text-muted-foreground text-sm mt-1">
                 {t("success")}
               </p>
@@ -98,13 +121,14 @@ export default function CompanyAuth({
                 {t("yourLoginCode")}
               </div>
               <div className="flex items-center gap-3">
-                <code className="text-lg font-mono font-bold tracking-widest flex-1 text-blue-400">
-                  {newCode.code}
+                <code className="text-lg font-mono font-bold tracking-widest flex-1 text-primary">
+                  {newCompany.code}
                 </code>
                 <button
                   type="button"
                   onClick={copyCode}
                   className="p-2 hover:bg-background rounded-lg transition-colors"
+                  data-ocid="company_auth.copy_button"
                 >
                   {copied ? (
                     <Check size={16} className="text-green-500" />
@@ -115,16 +139,17 @@ export default function CompanyAuth({
               </div>
             </div>
             <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 mb-6">
-              <p className="text-amber-400 text-sm text-center">
+              <p className="text-amber-600 dark:text-amber-400 text-sm text-center">
                 ⚠️ {t("saveCodeWarning")}
               </p>
             </div>
             <button
               type="button"
               onClick={proceedToDashboard}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl transition-colors"
+              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold py-3 rounded-xl transition-colors"
+              data-ocid="company_auth.primary_button"
             >
-              {t("dashboard")} &rarr;
+              {t("dashboard")} →
             </button>
           </div>
         </div>
@@ -139,6 +164,7 @@ export default function CompanyAuth({
           type="button"
           onClick={() => setPage("landing")}
           className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors"
+          data-ocid="company_auth.link"
         >
           <ArrowLeft size={18} />
           <span className="text-sm">{t("back")}</span>
@@ -148,6 +174,7 @@ export default function CompanyAuth({
             value={lang}
             onChange={(e) => setLang(e.target.value as Lang)}
             className="text-sm bg-card border border-border rounded-md px-2 py-1 focus:outline-none"
+            data-ocid="company_auth.select"
           >
             {LANGUAGES.map((l) => (
               <option key={l.code} value={l.code}>
@@ -159,6 +186,7 @@ export default function CompanyAuth({
             type="button"
             onClick={() => setDark(!dark)}
             className="p-2 rounded-lg hover:bg-muted transition-colors"
+            data-ocid="company_auth.toggle"
           >
             {dark ? <Sun size={18} /> : <Moon size={18} />}
           </button>
@@ -169,16 +197,17 @@ export default function CompanyAuth({
           <div className="text-center mb-8">
             <h1 className="text-2xl font-bold">{t("companyLogin")}</h1>
           </div>
-          <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-xl">
+          <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-card">
             <div className="flex border-b border-border">
               <button
                 type="button"
                 onClick={() => setTab("login")}
                 className={`flex-1 py-4 text-sm font-medium transition-colors ${
                   tab === "login"
-                    ? "bg-blue-600/10 text-blue-400 border-b-2 border-blue-500"
+                    ? "bg-primary/10 text-primary border-b-2 border-primary"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
+                data-ocid="company_auth.tab"
               >
                 {t("login")}
               </button>
@@ -187,9 +216,10 @@ export default function CompanyAuth({
                 onClick={() => setTab("register")}
                 className={`flex-1 py-4 text-sm font-medium transition-colors ${
                   tab === "register"
-                    ? "bg-blue-600/10 text-blue-400 border-b-2 border-blue-500"
+                    ? "bg-primary/10 text-primary border-b-2 border-primary"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
+                data-ocid="company_auth.tab"
               >
                 {t("register")}
               </button>
@@ -198,9 +228,12 @@ export default function CompanyAuth({
               {tab === "login" ? (
                 <div className="space-y-4">
                   <div>
-                    <div className="block text-sm font-medium mb-2">
+                    <label
+                      htmlFor="company-login-code"
+                      className="block text-sm font-medium mb-2"
+                    >
                       {t("loginCode")}
-                    </div>
+                    </label>
                     <input
                       id="company-login-code"
                       type="text"
@@ -208,50 +241,49 @@ export default function CompanyAuth({
                       onChange={(e) => setLoginCode(e.target.value)}
                       onKeyDown={(e) => e.key === "Enter" && handleLogin()}
                       placeholder={t("enterLoginCode")}
-                      className="w-full bg-background border border-border rounded-xl px-4 py-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      autoComplete="off"
+                      className="w-full bg-background border border-border rounded-xl px-4 py-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                      data-ocid="company_auth.input"
                     />
                   </div>
                   <button
                     type="button"
                     onClick={handleLogin}
-                    disabled={loading}
-                    className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold py-3 rounded-xl transition-colors"
+                    disabled={loading || isFetching}
+                    className="w-full bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
+                    data-ocid="company_auth.submit_button"
                   >
+                    {loading && <Loader2 size={16} className="animate-spin" />}
                     {loading ? t("loading") : t("login")}
                   </button>
                 </div>
               ) : (
                 <div className="space-y-4">
                   <div>
-                    <div className="block text-sm font-medium mb-2">
+                    <label
+                      htmlFor="company-name"
+                      className="block text-sm font-medium mb-2"
+                    >
                       {t("companyName")}
-                    </div>
+                    </label>
                     <input
                       id="company-name"
                       type="text"
                       value={companyName}
                       onChange={(e) => setCompanyName(e.target.value)}
-                      className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                  </div>
-                  <div>
-                    <div className="block text-sm font-medium mb-2">
-                      {t("authorizedPerson")}
-                    </div>
-                    <input
-                      id="company-auth-person"
-                      type="text"
-                      value={authorizedPerson}
-                      onChange={(e) => setAuthorizedPerson(e.target.value)}
-                      className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      onKeyDown={(e) => e.key === "Enter" && handleRegister()}
+                      className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                      data-ocid="company_auth.input"
                     />
                   </div>
                   <button
                     type="button"
                     onClick={handleRegister}
-                    disabled={loading}
-                    className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold py-3 rounded-xl transition-colors"
+                    disabled={loading || isFetching}
+                    className="w-full bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
+                    data-ocid="company_auth.submit_button"
                   >
+                    {loading && <Loader2 size={16} className="animate-spin" />}
                     {loading ? t("loading") : t("createCompany")}
                   </button>
                 </div>
